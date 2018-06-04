@@ -8,7 +8,23 @@
 #include <sys/epoll.h>
 #include <fcntl.h>
 #include <netinet/tcp.h>
+#include <assert.h>
+#include <errno.h>
+#include <sys/sysmacros.h>
+#include <pthread.h>
 
+#include <urcu/arch.h>
+#include <urcu/tls-compat.h>
+#include <urcu/uatomic.h>
+#include "thread-id.h"
+
+/* hardcoded number of CPUs */
+#define NR_CPUS 16384
+
+#ifndef DYNAMIC_LINK_TEST
+#define _LGPL_SOURCE
+#endif
+#include <urcu/wfcqueue.h>
 
 typedef struct {
 	int  fd;
@@ -32,7 +48,9 @@ int create_socket(int port)
 	}
 	int opt = 1;
 	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const void*)&opt,
-	sizeof(int));
+		sizeof(int));
+	setsockopt(s, SOL_SOCKET, SO_REUSEPORT, (const void*)&opt,
+		sizeof(int));
 
 	if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
 		perror("Unable to bind");
@@ -158,23 +176,23 @@ int main(void)
 					int fl = fcntl(peers[p_len]->fd, F_GETFL);
 					fcntl(peers[p_len]->fd, F_SETFL, fl|O_NONBLOCK|O_ASYNC);
 
-					int flags =1;
-					if (setsockopt(peers[p_len]->fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flags, sizeof(flags))) {
+					int op =1;
+					if (setsockopt(peers[p_len]->fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&op, sizeof(op))) {
 						perror("setsocketopt(), SO_KEEPALIVE");
 						exit(EXIT_FAILURE);
 					}
-					flags = 10;
-					if (setsockopt(peers[p_len]->fd, SOL_TCP, TCP_KEEPIDLE, (void *)&flags, sizeof(flags))) {
+					op = 10;
+					if (setsockopt(peers[p_len]->fd, SOL_TCP, TCP_KEEPIDLE, (void *)&op, sizeof(op))) {
 						perror("setsocketopt(), SO_KEEPALIVE");
 						exit(EXIT_FAILURE);
 					}
-					flags = 5;
-					if (setsockopt(peers[p_len]->fd, SOL_TCP, TCP_KEEPCNT, (void *)&flags, sizeof(flags))) {
+					op = 5;
+					if (setsockopt(peers[p_len]->fd, SOL_TCP, TCP_KEEPCNT, (void *)&op, sizeof(op))) {
 						perror("setsocketopt(), SO_KEEPALIVE");
 						exit(EXIT_FAILURE);
 					}
-					flags = 5;
-					if (setsockopt(peers[p_len]->fd, SOL_TCP, TCP_KEEPINTVL, (void *)&flags, sizeof(flags))) {
+					op = 5;
+					if (setsockopt(peers[p_len]->fd, SOL_TCP, TCP_KEEPINTVL, (void *)&op, sizeof(op))) {
 						perror("setsocketopt(), SO_KEEPALIVE");
 						exit(EXIT_FAILURE);
 					}

@@ -1,5 +1,5 @@
 CFLAGS  := -Wall -Wextra -pipe -pedantic -std=c99
-LIBS    := -lcrypto -lssl -lurcu
+LIBS    := -lcrypto -lssl -lurcu -lpthread
 PERF    ?=
 ifeq ($(PERF), 1)
 LDFLAGS := -Wl,--as-needed -Wl,--hash-style=gnu
