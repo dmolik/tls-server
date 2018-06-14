@@ -234,6 +234,10 @@ int main(void)
 									SSL_shutdown(peers[p]->ssl);
 									SSL_free(peers[p]->ssl);
 									epoll_ctl(epollfd, EPOLL_CTL_DEL, peers[p]->fd, &ev);
+									free(peers[p]);
+									if (p != p_len)
+										peers[p] = peers[p + 1];
+									p_len--;
 								}
 								for (int c = 0; c < p_len; c++) {
 									if (c != p)
@@ -248,6 +252,10 @@ int main(void)
 									SSL_shutdown(peers[p]->ssl);
 									SSL_free(peers[p]->ssl);
 									epoll_ctl(epollfd, EPOLL_CTL_DEL, peers[p]->fd, &ev);
+									free(peers[p]);
+									if (p != p_len)
+										peers[p] = peers[p + 1];
+									p_len--;
 								}
 							}
 							memset(buf, 0, 1024);
