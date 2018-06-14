@@ -235,7 +235,7 @@ int main(void)
 		exit(EXIT_FAILURE);
 	}
 	server->peer_len = 0;
-	server->peers     = malloc(sizeof(peer_t**));
+	server->peers    = malloc(sizeof(peer_t**));
 
 	for (;;) {
 		if ((nfds = epoll_wait(server->epollfd, events, SOMAXCONN, -1)) == -1) {
@@ -290,6 +290,7 @@ int main(void)
 								}
 							}
 							memset(buf, 0, 1024);
+							break;
 						}
 					}
 				}
