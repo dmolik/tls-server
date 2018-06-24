@@ -13,19 +13,6 @@
 #include <sys/sysmacros.h>
 #include <pthread.h>
 
-#include <urcu/arch.h>
-#include <urcu/tls-compat.h>
-#include <urcu/uatomic.h>
-#include "thread-id.h"
-
-/* hardcoded number of CPUs */
-#define NR_CPUS 16384
-
-#ifndef DYNAMIC_LINK_TEST
-#define _LGPL_SOURCE
-#endif
-#include <urcu/wfcqueue.h>
-
 typedef struct {
 	int  fd;
 	SSL *ssl;
@@ -33,11 +20,15 @@ typedef struct {
 } peer_t;
 
 typedef struct {
+	int               peer_len;
+	peer_t          **peers;
+	pthread_mutex_t  *lock;
+} sessions_t;
+
+typedef struct {
 	int       fd;
 	int       epollfd;
-	int       peer_len;
 	SSL_CTX  *ctx;
-	peer_t  **peers;
 } server_t;
 
 int create_socket(int port)
@@ -60,6 +51,9 @@ int create_socket(int port)
 	setsockopt(s, SOL_SOCKET, SO_REUSEPORT, (const void*)&opt,
 		sizeof(int));
 
+	int fl = fcntl(s, F_GETFL);
+	fcntl(s, F_SETFL, fl|O_NONBLOCK|O_ASYNC);
+
 	if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
 		perror("Unable to bind");
 		exit(EXIT_FAILURE);
@@ -75,7 +69,7 @@ int create_socket(int port)
 
 void init_openssl()
 {
-	SSL_load_error_strings();	
+	SSL_load_error_strings();
 	OpenSSL_add_ssl_algorithms();
 }
 
@@ -101,8 +95,10 @@ SSL_CTX *create_context()
 	return ctx;
 }
 
+//void configure_context(SSL_CTX *ctx, sessions_t *sessions)
 void configure_context(SSL_CTX *ctx)
 {
+	//pthread_mutex_lock(sessions->lock);
 	SSL_CTX_set_ecdh_auto(ctx, 1);
 
 	const long flags = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_COMPRESSION;
@@ -123,103 +119,106 @@ void configure_context(SSL_CTX *ctx)
 		ERR_print_errors_fp(stderr);
 		exit(EXIT_FAILURE);
 	}
+	// pthread_mutex_unlock(sessions->lock);
 }
 
-int add_client(server_t *server, struct sockaddr_in peer_addr, int peer_fd) {
-	server->peers[server->peer_len]     = malloc(sizeof(peer_t));
-	server->peers[server->peer_len]->fd = peer_fd;
-	int fl = fcntl(server->peers[server->peer_len]->fd, F_GETFL);
-	fcntl(server->peers[server->peer_len]->fd, F_SETFL, fl|O_NONBLOCK|O_ASYNC);
+int add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_addr, int peer_fd) {
+	pthread_mutex_lock(sessions->lock);
+	sessions->peers[sessions->peer_len]     = malloc(sizeof(peer_t));
+	sessions->peers[sessions->peer_len]->fd = peer_fd;
+	int fl = fcntl(sessions->peers[sessions->peer_len]->fd, F_GETFL);
+	fcntl(sessions->peers[sessions->peer_len]->fd, F_SETFL, fl|O_NONBLOCK|O_ASYNC);
 
 	int op =1;
-	if (setsockopt(server->peers[server->peer_len]->fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&op, sizeof(op))) {
+	if (setsockopt(sessions->peers[sessions->peer_len]->fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&op, sizeof(op))) {
 		perror("setsocketopt(), SO_KEEPALIVE");
 		exit(EXIT_FAILURE);
 	}
 	op = 10;
-	if (setsockopt(server->peers[server->peer_len]->fd, SOL_TCP, TCP_KEEPIDLE, (void *)&op, sizeof(op))) {
+	if (setsockopt(sessions->peers[sessions->peer_len]->fd, SOL_TCP, TCP_KEEPIDLE, (void *)&op, sizeof(op))) {
 		perror("setsocketopt(), SO_KEEPALIVE");
 		exit(EXIT_FAILURE);
 	}
 	op = 5;
-	if (setsockopt(server->peers[server->peer_len]->fd, SOL_TCP, TCP_KEEPCNT, (void *)&op, sizeof(op))) {
+	if (setsockopt(sessions->peers[sessions->peer_len]->fd, SOL_TCP, TCP_KEEPCNT, (void *)&op, sizeof(op))) {
 		perror("setsocketopt(), SO_KEEPALIVE");
 		exit(EXIT_FAILURE);
 	}
 	op = 5;
-	if (setsockopt(server->peers[server->peer_len]->fd, SOL_TCP, TCP_KEEPINTVL, (void *)&op, sizeof(op))) {
+	if (setsockopt(sessions->peers[sessions->peer_len]->fd, SOL_TCP, TCP_KEEPINTVL, (void *)&op, sizeof(op))) {
 		perror("setsocketopt(), SO_KEEPALIVE");
 		exit(EXIT_FAILURE);
 	}
 
-	server->peers[server->peer_len]->addr = peer_addr;
-	server->peers[server->peer_len]->ssl  = SSL_new(server->ctx);
+	sessions->peers[sessions->peer_len]->addr = peer_addr;
+	sessions->peers[sessions->peer_len]->ssl  = SSL_new(server->ctx);
 
-	SSL_set_fd(server->peers[server->peer_len]->ssl,
-		server->peers[server->peer_len]->fd);
-	SSL_set_accept_state(server->peers[server->peer_len]->ssl);
-	SSL_do_handshake(server->peers[server->peer_len]->ssl);
+	SSL_set_fd(sessions->peers[sessions->peer_len]->ssl,
+		sessions->peers[sessions->peer_len]->fd);
+	SSL_set_accept_state(sessions->peers[sessions->peer_len]->ssl);
+	SSL_do_handshake(sessions->peers[sessions->peer_len]->ssl);
 
 	struct epoll_event ev;
 	ev.events = EPOLLIN|EPOLLET;
-	ev.data.fd = server->peers[server->peer_len]->fd;
-	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, server->peers[server->peer_len]->fd, &ev) == -1) {
+	ev.data.fd = sessions->peers[sessions->peer_len]->fd;
+	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, sessions->peers[sessions->peer_len]->fd, &ev) == -1) {
 		perror("failed to add peer socket to fd loop");
 		exit(EXIT_FAILURE);
 	}
-	printf("Client connected from %s:%u\n", inet_ntoa(server->peers[server->peer_len]->addr.sin_addr),
-		ntohs(server->peers[server->peer_len]->addr.sin_port));
-	server->peer_len++;
+	printf("Client connected from %s:%u\n", inet_ntoa(sessions->peers[sessions->peer_len]->addr.sin_addr),
+		ntohs(sessions->peers[sessions->peer_len]->addr.sin_port));
+	sessions->peer_len++;
+	pthread_mutex_unlock(sessions->lock);
 
 	return 0;
 }
 
-int delete_client(server_t *server, int p)
+int delete_client(server_t *server, sessions_t *sessions, int p)
 {
-	SSL_shutdown(server->peers[p]->ssl);
-	SSL_free(server->peers[p]->ssl);
+	pthread_mutex_lock(sessions->lock);
+	SSL_shutdown(sessions->peers[p]->ssl);
+	SSL_free(sessions->peers[p]->ssl);
 	struct epoll_event ev;
-	epoll_ctl(server->epollfd, EPOLL_CTL_DEL, server->peers[p]->fd, &ev);
-	free(server->peers[p]);
-	if (p != server->peer_len)
-		server->peers[p] = server->peers[p + 1];
-	server->peer_len--;
+	epoll_ctl(server->epollfd, EPOLL_CTL_DEL, sessions->peers[p]->fd, &ev);
+	free(sessions->peers[p]);
+	if (p != sessions->peer_len)
+		sessions->peers[p] = sessions->peers[p + 1];
+	sessions->peer_len--;
+	pthread_mutex_unlock(sessions->lock);
 
 	return 0;
 }
 
-int send_msg(server_t *server, int peer, char *msg, int msg_size)
+int send_msg(sessions_t *sessions, int peer, char *msg, int msg_size)
 {
-	SSL_write(server->peers[peer]->ssl, msg, msg_size);
+	SSL_write(sessions->peers[peer]->ssl, msg, msg_size);
 
 	return 0;
 }
 
-int send_msg_all(server_t *server, int peer, char *msg, int msg_size)
+int send_msg_all(sessions_t *sessions, int peer, char *msg, int msg_size)
 {
-	for (int c = 0; c < server->peer_len; c++) {
+	for (int c = 0; c < sessions->peer_len; c++) {
 		if (c != peer)
-			SSL_write(server->peers[c]->ssl, msg, msg_size);
+			SSL_write(sessions->peers[c]->ssl, msg, msg_size);
 	}
 
 	return 0;
 }
 
-int main(void)
+static void *
+server(void *data)
 {
+	sessions_t *sessions = (sessions_t *) data;
 	server_t *server = malloc(sizeof(server_t));
 
 	struct sockaddr_in peer_addr;
 	socklen_t peer_addr_size = sizeof(struct sockaddr_in);
 
-	init_openssl();
+	server->fd = create_socket(3002);
+
 	server->ctx = create_context();
-
 	configure_context(server->ctx);
-
-	server->fd = create_socket(3001);
-	// int fl = fcntl(serv_fd, F_GETFL);
-	// fcntl(serv_fd, F_SETFL, fl|O_NONBLOCK|O_ASYNC);
 
 	struct epoll_event ev, events[SOMAXCONN];
 	int nfds, n, p, peer_fd;
@@ -228,15 +227,12 @@ int main(void)
 		perror("failed to create fd loop");
 		exit(EXIT_FAILURE);
 	}
-	ev.events = EPOLLIN; //|EPOLLET;
+	ev.events = EPOLLIN|EPOLLET;
 	ev.data.fd = server->fd;
 	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, server->fd, &ev) == -1) {
 		perror("failed to add listening socket to fd loop");
 		exit(EXIT_FAILURE);
 	}
-	server->peer_len = 0;
-	server->peers    = malloc(sizeof(peer_t**));
-
 	for (;;) {
 		if ((nfds = epoll_wait(server->epollfd, events, SOMAXCONN, -1)) == -1) {
 			perror("catastropic epoll_wait");
@@ -258,35 +254,35 @@ int main(void)
 						perror("Unable to accept");
 						exit(EXIT_FAILURE);
 					}
-					add_client(server, peer_addr, peer_fd);
-					printf("total peers: %d\n", server->peer_len);
+					add_client(server, sessions, peer_addr, peer_fd);
+					printf("total peers: %d\n", sessions->peer_len);
 				} else {
-					for (p = 0; p < server->peer_len; p++) {
-						if (events[n].data.fd == server->peers[p]->fd) {
+					for (p = 0; p < sessions->peer_len; p++) {
+						if (events[n].data.fd == sessions->peers[p]->fd) {
 							char buf[1024];
 							int len;
-							len = SSL_read(server->peers[p]->ssl, buf, 1024);
+							len = SSL_read(sessions->peers[p]->ssl, buf, 1024);
 							if (len > 0) {
-								printf("%s:%u - %s", inet_ntoa(server->peers[p]->addr.sin_addr),
-									ntohs(server->peers[p]->addr.sin_port), buf);
+								printf("%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
+									ntohs(sessions->peers[p]->addr.sin_port), buf);
 								char *msg = malloc(1200);
 								memset(msg, 0, 1200);
-								sprintf(msg, "%s:%u - %s", inet_ntoa(server->peers[p]->addr.sin_addr),
-									ntohs(server->peers[p]->addr.sin_port), buf);
-								send_msg_all(server, p, msg, 1200);
+								sprintf(msg, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
+									ntohs(sessions->peers[p]->addr.sin_port), buf);
+								send_msg_all(sessions, p, msg, 1200);
 								if (strncmp(buf, "done", 4) == 0) {
 									memset(msg, 0, 1200);
 									sprintf(msg, "server hanging up\n");
-									send_msg(server, p, msg, 1200);
-									delete_client(server, p);
+									send_msg(sessions, p, msg, 1200);
+									delete_client(server, sessions, p);
 								}
 								free(msg);
 							}
 							if (len <= 0) {
 								if (errno != EAGAIN) {
-									printf("%s:%u - hangup\n", inet_ntoa(server->peers[p]->addr.sin_addr),
-										ntohs(server->peers[p]->addr.sin_port));
-									delete_client(server, p);
+									printf("%s:%u - hangup\n", inet_ntoa(sessions->peers[p]->addr.sin_addr),
+										ntohs(sessions->peers[p]->addr.sin_port));
+									delete_client(server, sessions, p);
 								}
 							}
 							memset(buf, 0, 1024);
@@ -300,6 +296,34 @@ int main(void)
 
 	close(server->fd);
 	SSL_CTX_free(server->ctx);
+
+	return (NULL);
+}
+
+int main(void)
+{
+	init_openssl();
+
+	sessions_t *sessions = malloc(sizeof(sessions_t));
+	sessions->peer_len   = 0;
+	sessions->peers      = malloc(sizeof(peer_t**));
+	sessions->lock       = malloc(sizeof(pthread_mutex_t));
+
+	if (pthread_mutex_init(sessions->lock, NULL) != 0) {
+		printf("\n mutex init failed\n");
+		return 1;
+	}
+
+	int num_threads  = 8;
+	pthread_t threads[num_threads];
+
+	for (int i = 0; i < num_threads; i++)
+		pthread_create(threads + i, NULL, &server, sessions);
+
+	for (int i = 0; i < num_threads; i++)
+		pthread_join(threads[i], NULL);
+
+	pthread_mutex_destroy(sessions->lock);
 	cleanup_openssl();
 
 	return 0;
