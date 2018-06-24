@@ -181,7 +181,7 @@ int delete_client(server_t *server, sessions_t *sessions, int p)
 	struct epoll_event ev;
 	epoll_ctl(server->epollfd, EPOLL_CTL_DEL, sessions->peers[p]->fd, &ev);
 	free(sessions->peers[p]);
-	if (p != sessions->peer_len)
+	if (p < sessions->peer_len)
 		sessions->peers[p] = sessions->peers[p + 1];
 	sessions->peer_len--;
 	pthread_mutex_unlock(sessions->lock);
