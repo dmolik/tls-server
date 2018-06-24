@@ -21,8 +21,8 @@ typedef struct {
 
 typedef struct {
 	int               peer_len;
-	peer_t          **peers;
 	pthread_mutex_t  *lock;
+	peer_t          **peers;
 } sessions_t;
 
 typedef struct {
