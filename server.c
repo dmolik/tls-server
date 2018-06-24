@@ -301,4 +301,6 @@ int main(void)
 	close(server->fd);
 	SSL_CTX_free(server->ctx);
 	cleanup_openssl();
+
+	return 0;
 }
