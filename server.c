@@ -31,6 +31,8 @@ typedef struct {
 	SSL_CTX  *ctx;
 } server_t;
 
+sessions_t *sessions;
+
 int create_socket(int port)
 {
 	int s;
@@ -182,7 +184,8 @@ int delete_client(server_t *server, sessions_t *sessions, int p)
 	epoll_ctl(server->epollfd, EPOLL_CTL_DEL, sessions->peers[p]->fd, &ev);
 	free(sessions->peers[p]);
 	if (p < sessions->peer_len)
-		sessions->peers[p] = sessions->peers[p + 1];
+	for (int i = p; i < sessions->peer_len; i++)
+		sessions->peers[i] = sessions->peers[i + 1];
 	sessions->peer_len--;
 	pthread_mutex_unlock(sessions->lock);
 
@@ -274,7 +277,10 @@ server(void *data)
 									memset(msg, 0, 1200);
 									sprintf(msg, "server hanging up\n");
 									send_msg(sessions, p, msg, 1200);
+									printf("%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
+										ntohs(sessions->peers[p]->addr.sin_port), "closing connection for\n");
 									delete_client(server, sessions, p);
+									printf("total peers: %d\n", sessions->peer_len);
 								}
 								free(msg);
 							}
@@ -283,6 +289,7 @@ server(void *data)
 									printf("%s:%u - hangup\n", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 										ntohs(sessions->peers[p]->addr.sin_port));
 									delete_client(server, sessions, p);
+									printf("total peers: %d\n", sessions->peer_len);
 								}
 							}
 							memset(buf, 0, 1024);
@@ -304,7 +311,7 @@ int main(void)
 {
 	init_openssl();
 
-	sessions_t *sessions = malloc(sizeof(sessions_t));
+	sessions = malloc(sizeof(sessions_t));
 	sessions->peer_len   = 0;
 	sessions->peers      = malloc(sizeof(peer_t**));
 	sessions->lock       = malloc(sizeof(pthread_mutex_t));
