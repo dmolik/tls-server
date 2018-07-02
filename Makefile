@@ -10,13 +10,13 @@ BIN = server
 
 all: $(BIN)
 
-$(BIN): $(BIN).o
+$(BIN): src/$(BIN).o
 	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
 ifeq ($(PERF), 1)
 	strip $(BIN)
 endif
 
-%.o: %.c $(DEPS)
+src/%.o: src/%.c $(DEPS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 

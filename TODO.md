@@ -1,4 +1,8 @@
-# IDEAS
+## REFACTORING
+
+  -  [ ] Move to thread-local session storage, with event-loop based communication
+
+## IDEAS
 
   -  [ ] Error Checking
   -  [ ] Daemon
