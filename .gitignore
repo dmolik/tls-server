@@ -1,3 +1,4 @@
 *.pem
 *.o
 /server
+/pairs

@@ -19,6 +19,9 @@ endif
 src/%.o: src/%.c $(DEPS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+exp: pairs
+pairs:
+	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ exp/$@.c
 
 clean:
-	rm -f *.o $(BIN)
+	rm -f src/*.o $(BIN) pairs

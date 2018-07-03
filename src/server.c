@@ -22,7 +22,6 @@ typedef struct {
 
 typedef struct {
 	int               peer_len;
-	pthread_mutex_t  *lock;
 	peer_t          **peers;
 } sessions_t;
 
@@ -43,9 +42,16 @@ typedef struct {
 		int   level;
 	} log;
 } config_t;
+config_t  *config;
 
-sessions_t *sessions;
-config_t   *config;
+typedef struct {
+	int fd[2];
+} pair_t;
+typedef struct {
+	int      len;
+	pair_t **pairs;
+} comm_t;
+comm_t *intercom;
 
 int create_socket(void)
 {
@@ -106,10 +112,8 @@ SSL_CTX *create_context()
 	return ctx;
 }
 
-//void configure_context(SSL_CTX *ctx, sessions_t *sessions)
 void configure_context(SSL_CTX *ctx)
 {
-	//pthread_mutex_lock(sessions->lock);
 	SSL_CTX_set_ecdh_auto(ctx, 1);
 
 	const long flags = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_COMPRESSION;
@@ -130,11 +134,9 @@ void configure_context(SSL_CTX *ctx)
 		ERR_print_errors_fp(stderr);
 		exit(EXIT_FAILURE);
 	}
-	// pthread_mutex_unlock(sessions->lock);
 }
 
 int add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_addr, int peer_fd) {
-	pthread_mutex_lock(sessions->lock);
 	sessions->peers[sessions->peer_len]     = malloc(sizeof(peer_t));
 	sessions->peers[sessions->peer_len]->fd = peer_fd;
 	int fl = fcntl(sessions->peers[sessions->peer_len]->fd, F_GETFL);
@@ -179,14 +181,12 @@ int add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_a
 	printf("Client connected from %s:%u\n", inet_ntoa(sessions->peers[sessions->peer_len]->addr.sin_addr),
 		ntohs(sessions->peers[sessions->peer_len]->addr.sin_port));
 	sessions->peer_len++;
-	pthread_mutex_unlock(sessions->lock);
 
 	return 0;
 }
 
 int delete_client(server_t *server, sessions_t *sessions, int p)
 {
-	pthread_mutex_lock(sessions->lock);
 	SSL_shutdown(sessions->peers[p]->ssl);
 	SSL_free(sessions->peers[p]->ssl);
 	struct epoll_event ev;
@@ -196,7 +196,6 @@ int delete_client(server_t *server, sessions_t *sessions, int p)
 	for (int i = p; i < sessions->peer_len; i++)
 		sessions->peers[i] = sessions->peers[i + 1];
 	sessions->peer_len--;
-	pthread_mutex_unlock(sessions->lock);
 
 	return 0;
 }
@@ -221,8 +220,13 @@ int send_msg_all(sessions_t *sessions, int peer, char *msg, int msg_size)
 static void *
 server(void *data)
 {
-	sessions_t *sessions = (sessions_t *) data;
+	int id           = *((int *)data);
 	server_t *server = malloc(sizeof(server_t));
+
+	sessions_t *sessions;
+	sessions           = malloc(sizeof(sessions_t));
+	sessions->peer_len = 0;
+	sessions->peers    = malloc(sizeof(peer_t*) * config->sessions);
 
 	struct sockaddr_in peer_addr;
 	socklen_t peer_addr_size = sizeof(struct sockaddr_in);
@@ -245,6 +249,11 @@ server(void *data)
 		perror("failed to add listening socket to fd loop");
 		exit(EXIT_FAILURE);
 	}
+	ev.data.fd = intercom->pairs[id]->fd[1];
+	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, intercom->pairs[id]->fd[1], &ev) == -1) {
+		perror("failed to add listening socket to fd loop");
+		exit(EXIT_FAILURE);
+	}
 	for (;;) {
 		if ((nfds = epoll_wait(server->epollfd, events, SOMAXCONN, -1)) == -1) {
 			perror("catastropic epoll_wait");
@@ -262,12 +271,10 @@ server(void *data)
 							exit(EXIT_FAILURE);
 						}
 					}
-					if (peer_fd < 0) {
-						perror("Unable to accept");
-						exit(EXIT_FAILURE);
-					}
 					add_client(server, sessions, peer_addr, peer_fd);
 					printf("total peers: %d\n", sessions->peer_len);
+				} else if (events[n].data.fd == intercom->pairs[id]->fd[1]) {
+					// TODO do IPC
 				} else {
 					for (p = 0; p < sessions->peer_len; p++) {
 						if (events[n].data.fd == sessions->peers[p]->fd) {
@@ -320,11 +327,6 @@ int main(int argc, char *argv[])
 {
 	init_openssl();
 
-	sessions = malloc(sizeof(sessions_t));
-	sessions->peer_len   = 0;
-	sessions->peers      = malloc(sizeof(peer_t**));
-	sessions->lock       = malloc(sizeof(pthread_mutex_t));
-
 	config           = malloc(sizeof(config_t));
 	config->workers  = sysconf(_SC_NPROCESSORS_ONLN); // config via file
 	config->sessions = 1024;                          // config via file
@@ -333,19 +335,46 @@ int main(int argc, char *argv[])
 	config->addr.sin_port        = htons(3003);       // config via file
 	config->addr.sin_addr.s_addr = htonl(INADDR_ANY); // config via file
 
-	if (pthread_mutex_init(sessions->lock, NULL) != 0) {
-		printf("\n mutex init failed\n");
-		return 1;
+	struct epoll_event ev, events[SOMAXCONN];
+	int nfds, n, epollfd;
+
+	intercom = malloc(sizeof(comm_t));
+	intercom->len   = 0;
+	intercom->pairs = malloc(sizeof(pair_t*) * config->workers);
+	if ((epollfd = epoll_create1(0)) == -1) {
+		perror("failed to create fd loop");
+		exit(EXIT_FAILURE);
+	}
+	pthread_t threads[config->workers];
+	for (int i = 0; i < config->workers; i++) {
+		intercom->pairs[intercom->len] = malloc(sizeof(pair_t));
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, intercom->pairs[intercom->len]->fd) < 0) {
+			perror("opening stream socket pair");
+			exit(1);
+		}
+		ev.events  = EPOLLIN|EPOLLET;
+		ev.data.fd = intercom->pairs[intercom->len]->fd[0];
+		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, intercom->pairs[intercom->len]->fd[0], &ev) == -1) {
+			perror("failed to add listening socket to fd loop");
+			exit(EXIT_FAILURE);
+		}
+		pthread_create(threads + i, NULL, &server, (void *)&i);
+		intercom->len++;
 	}
 
-	pthread_t threads[config->workers];
-	for (int i = 0; i < config->workers; i++)
-		pthread_create(threads  + i, NULL, &server, sessions);
+	for (;;) {
+		if ((nfds = epoll_wait(epollfd, events, SOMAXCONN, -1)) == -1) {
+			for (n = 0; n < nfds; ++n) {
+				if (events[n].events & EPOLLIN) {
+
+				}
+			}
+		}
+	}
 
 	for (int i = 0; i < config->workers; i++)
 		pthread_join(threads[i], NULL);
 
-	pthread_mutex_destroy(sessions->lock);
 	cleanup_openssl();
 
 	return 0;
