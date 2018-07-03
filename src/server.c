@@ -294,8 +294,11 @@ server(void *data)
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
 								char imsg[1024] = "bcast";
 								strncat(imsg, msg, 1024 - 6);
-								for (int c = 0; c < config->workers; c++)
-									send(intercom->pairs[c]->fd[0], imsg, 1024, 0);
+								for (int c = 0; c < config->workers; c++) {
+									if (c != id)
+										send(intercom->pairs[c]->fd[0], imsg, 1024, 0);
+								}
+								send_msg_all(sessions,msg,1024);
 								memset(imsg, 0, 1024);
 
 								if (strncmp(buf, "done", 4) == 0) {
