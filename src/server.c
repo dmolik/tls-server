@@ -207,11 +207,10 @@ int send_msg(sessions_t *sessions, int peer, char *msg, int msg_size)
 	return 0;
 }
 
-int send_msg_all(sessions_t *sessions, int peer, char *msg, int msg_size)
+int send_msg_all(sessions_t *sessions, char *msg, int msg_size)
 {
 	for (int c = 0; c < sessions->peer_len; c++) {
-		if (c != peer)
-			SSL_write(sessions->peers[c]->ssl, msg, msg_size);
+		SSL_write(sessions->peers[c]->ssl, msg, msg_size);
 	}
 
 	return 0;
@@ -273,12 +272,12 @@ server(void *data)
 						}
 					}
 					add_client(server, sessions, peer_addr, peer_fd);
-					printf("total peers: %d\n", sessions->peer_len);
+					printf("[%d] now has %d sessions\n", id, sessions->peer_len);
 				} else if (events[n].data.fd == intercom->pairs[id]->fd[1]) {
 					char buf[1024];
 					read(intercom->pairs[id]->fd[1], buf, 1024);
-					if (strncmp(buf, "bcast", 5) == 0) {
-						send_msg_all(sessions, p, buf + 5, 1024 - 5);
+					if (strncmp("bcast", buf, 5) == 0) {
+						send_msg_all(sessions, buf + 5, 1024 - 5);
 					}
 					memset(buf, 0, 1024);
 				} else {
@@ -288,17 +287,15 @@ server(void *data)
 							int len;
 							len = SSL_read(sessions->peers[p]->ssl, buf, 1024);
 							if (len > 0) {
+								char msg[1024];
 								printf("%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
-								char *msg = malloc(1024);
-								memset(msg, 0, 1024);
 								sprintf(msg, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
-								char *imsg = malloc(1024);
-								      imsg = "bcast";
-								strncat(imsg, msg, 1024 - 5);
+								char imsg[1024] = "bcast";
+								strncat(imsg, msg, 1024 - 6);
 								for (int c = 0; c < config->workers; c++)
-									send(intercom->pairs[c]->fd[0], msg, 1024, 0);
+									send(intercom->pairs[c]->fd[0], imsg, 1024, 0);
 								memset(imsg, 0, 1024);
 
 								if (strncmp(buf, "done", 4) == 0) {
@@ -308,16 +305,16 @@ server(void *data)
 									printf("%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 										ntohs(sessions->peers[p]->addr.sin_port), "closing connection for\n");
 									delete_client(server, sessions, p);
-									printf("total peers: %d\n", sessions->peer_len);
+									printf("[%d] now has %d sessions\n", id, sessions->peer_len);
 								}
-								free(msg);
+								//free(msg);
 							}
 							if (len <= 0) {
 								if (errno != EAGAIN) {
 									printf("%s:%u - hangup\n", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 										ntohs(sessions->peers[p]->addr.sin_port));
 									delete_client(server, sessions, p);
-									printf("total peers: %d\n", sessions->peer_len);
+									printf("[%d] now has %d sessions\n", id, sessions->peer_len);
 								}
 							}
 							memset(buf, 0, 1024);
@@ -364,6 +361,7 @@ int main(int argc, char *argv[])
 			perror("opening stream socket pair");
 			exit(1);
 		}
+
 		fl = fcntl(intercom->pairs[intercom->len]->fd[0], F_GETFL);
 		fcntl(intercom->pairs[intercom->len]->fd[0], F_SETFL, fl|O_NONBLOCK|O_ASYNC);
 		fl = fcntl(intercom->pairs[intercom->len]->fd[1], F_GETFL);
