@@ -3,16 +3,20 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <sys/epoll.h>
+
 #include <fcntl.h>
 #include <netinet/tcp.h>
 #include <assert.h>
 #include <errno.h>
+
+#include <sys/epoll.h>
 #include <sys/sysmacros.h>
+
 #include <pthread.h>
 #include <getopt.h>
+
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 typedef struct {
 	int  fd;
@@ -21,8 +25,8 @@ typedef struct {
 } peer_t;
 
 typedef struct {
-	int               peer_len;
-	peer_t          **peers;
+	int      peer_len;
+	peer_t **peers;
 } sessions_t;
 
 typedef struct {
@@ -53,7 +57,8 @@ typedef struct {
 } comm_t;
 comm_t *intercom;
 
-int create_socket(void)
+int
+create_socket(void)
 {
 	int s;
 
@@ -84,13 +89,15 @@ int create_socket(void)
 	return s;
 }
 
-void init_openssl()
+void
+init_openssl()
 {
 	SSL_load_error_strings();
 	OpenSSL_add_ssl_algorithms();
 }
 
-void cleanup_openssl()
+void
+cleanup_openssl()
 {
 	EVP_cleanup();
 }
@@ -112,7 +119,8 @@ SSL_CTX *create_context()
 	return ctx;
 }
 
-void configure_context(SSL_CTX *ctx)
+void
+configure_context(SSL_CTX *ctx)
 {
 	SSL_CTX_set_ecdh_auto(ctx, 1);
 
@@ -122,7 +130,7 @@ void configure_context(SSL_CTX *ctx)
 		"kEECDH+ECDSA+AES256:EECDH+RSA+AES256+GCM+SHA384"
 		":EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH"
 		":HIGH:!aNULL:!eNULL:!EXPORT:!MD5:!RC4:!DES:!SSLv2"
-		":!LOW:!CAMELLIA";
+		":!LOW:!CAMELLIA"; // this should probably be configurable
 	SSL_CTX_set_cipher_list(ctx, PREFERRED_CIPHERS);
 
 	if (SSL_CTX_use_certificate_chain_file(ctx, "cert.pem") <= 0) {
@@ -136,7 +144,8 @@ void configure_context(SSL_CTX *ctx)
 	}
 }
 
-int add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_addr, int peer_fd) {
+int
+add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_addr, int peer_fd) {
 	sessions->peers[sessions->peer_len]     = malloc(sizeof(peer_t));
 	sessions->peers[sessions->peer_len]->fd = peer_fd;
 	int fl = fcntl(sessions->peers[sessions->peer_len]->fd, F_GETFL);
@@ -185,7 +194,8 @@ int add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_a
 	return 0;
 }
 
-int delete_client(server_t *server, sessions_t *sessions, int p)
+int
+delete_client(server_t *server, sessions_t *sessions, int p)
 {
 	SSL_shutdown(sessions->peers[p]->ssl);
 	SSL_free(sessions->peers[p]->ssl);
@@ -200,14 +210,16 @@ int delete_client(server_t *server, sessions_t *sessions, int p)
 	return 0;
 }
 
-int send_msg(sessions_t *sessions, int peer, char *msg, int msg_size)
+int
+send_msg(sessions_t *sessions, int peer, char *msg, int msg_size)
 {
 	SSL_write(sessions->peers[peer]->ssl, msg, msg_size);
 
 	return 0;
 }
 
-int send_msg_all(sessions_t *sessions, char *msg, int msg_size)
+int
+send_msg_all(sessions_t *sessions, char *msg, int msg_size)
 {
 	for (int c = 0; c < sessions->peer_len; c++) {
 		SSL_write(sessions->peers[c]->ssl, msg, msg_size);
@@ -265,7 +277,7 @@ server(void *data)
 				if (events[n].data.fd == server->fd) {
 					if ((peer_fd = accept(server->fd, (struct sockaddr *) &peer_addr, &peer_addr_size)) == -1) {
 						if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-							break;
+							continue; // break;
 						} else {
 							perror("unable to accept connections");
 							exit(EXIT_FAILURE);
@@ -311,8 +323,7 @@ server(void *data)
 									printf("[%d] now has %d sessions\n", id, sessions->peer_len);
 								}
 								//free(msg);
-							}
-							if (len <= 0) {
+							} else if (len <= 0) {
 								if (errno != EAGAIN) {
 									printf("%s:%u - hangup\n", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 										ntohs(sessions->peers[p]->addr.sin_port));
@@ -321,7 +332,7 @@ server(void *data)
 								}
 							}
 							memset(buf, 0, 1024);
-							break;
+							//break;
 						}
 					}
 				}
@@ -335,7 +346,8 @@ server(void *data)
 	return (NULL);
 }
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
 	init_openssl();
 
@@ -346,6 +358,73 @@ int main(int argc, char *argv[])
 	config->addr.sin_family      = AF_INET;
 	config->addr.sin_port        = htons(3003);       // config via file
 	config->addr.sin_addr.s_addr = htonl(INADDR_ANY); // config via file
+	struct option long_opts[] = {
+		{ "help",             no_argument, NULL, 'h' },
+		{ "verbose",          no_argument, NULL, 'v' },
+		{ "foreground",       no_argument, NULL, 'F' },
+		{ "config",     required_argument, NULL, 'c' },
+		{ "pidfile",    required_argument, NULL, 'p' },
+		{ "user",       required_argument, NULL, 'u' },
+		{ "group",      required_argument, NULL, 'g' },
+		{ 0, 0, 0, 0 },
+	};
+	for (;;) {
+		int idx = 1;
+		int c = getopt_long(argc, argv, "h?v+Fc:p:u:g:", long_opts, &idx);
+		if (c == -1) break;
+
+		switch (c) {
+		case 'h':
+		case '?':
+			printf("%s v%s\n", "tls-server", "0.0.1");
+			printf("Usage: %s [-h?Fv] [-c /path/to/config]\n"
+			       "          [-u user] [-g group] [-p /path/to/pidfile\n\n",
+			        "tls-server");
+
+			printf("Option:\n");
+			printf("  -?, -h, --help    show this help screen\n");
+			printf("  -F, --foreground  don't daemonize, stay in foreground\n");
+			printf("  -v, --verbose     increase debugging\n");
+
+			printf("  -c, --config      file path containing the config\n");
+
+			printf("  -p, --pidfile     where to store the pidfile\n");
+			printf("  -u, --user        the user to run as\n");
+			printf("  -g, --group       the group to run under\n\n");
+
+			printf("See also: \n  %s\n", "https://github.com/dmolik/tls-server"); // PACKAGE_URL);
+
+			exit(EXIT_SUCCESS);
+
+		case 'v':
+			//server_c.verbose++;
+			break;
+
+		case 'F':
+			//server_c.daemonize = 0;
+			break;
+
+		case 'c':
+			//server_c.conf = strdup(optarg);
+			break;
+
+		case 'p':
+			//server_c.pid = strdup(optarg);
+			break;
+
+		case 'u':
+			//server_c.uid = strdup(optarg);
+			break;
+
+		case 'g':
+			//server_c.gid = strdup(optarg);
+			break;
+
+		default:
+			fprintf(stderr, "unhandled option flag %#02x\n", c);
+			return 1;
+		}
+	}
 
 	struct epoll_event ev, events[SOMAXCONN];
 	int nfds, n, epollfd, fl;
