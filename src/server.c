@@ -19,9 +19,10 @@
 #include <openssl/err.h>
 
 typedef struct {
-	int  fd;
-	SSL *ssl;
-	struct sockaddr_in addr;
+	int                 fd;
+	unsigned int        starttime;
+	SSL                *ssl;
+	struct sockaddr_in  addr;
 } peer_t;
 
 typedef struct {
