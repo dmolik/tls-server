@@ -249,6 +249,7 @@ server(void *data)
 		perror("failed to add listening socket to fd loop");
 		exit(EXIT_FAILURE);
 	}
+
 	ev.data.fd = intercom->pairs[id]->fd[1];
 	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, intercom->pairs[id]->fd[1], &ev) == -1) {
 		perror("failed to add listening socket to fd loop");
@@ -274,7 +275,12 @@ server(void *data)
 					add_client(server, sessions, peer_addr, peer_fd);
 					printf("total peers: %d\n", sessions->peer_len);
 				} else if (events[n].data.fd == intercom->pairs[id]->fd[1]) {
-					// TODO do IPC
+					char buf[1024];
+					read(intercom->pairs[id]->fd[1], buf, 1024);
+					if (strncmp(buf, "bcast", 5) == 0) {
+						send_msg_all(sessions, p, buf + 5, 1024 - 5);
+					}
+					memset(buf, 0, 1024);
 				} else {
 					for (p = 0; p < sessions->peer_len; p++) {
 						if (events[n].data.fd == sessions->peers[p]->fd) {
@@ -284,11 +290,17 @@ server(void *data)
 							if (len > 0) {
 								printf("%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
-								char *msg = malloc(1200);
-								memset(msg, 0, 1200);
+								char *msg = malloc(1024);
+								memset(msg, 0, 1024);
 								sprintf(msg, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
-								send_msg_all(sessions, p, msg, 1200);
+								char *imsg = malloc(1024);
+								      imsg = "bcast";
+								strncat(imsg, msg, 1024 - 5);
+								for (int c = 0; c < config->workers; c++)
+									send(intercom->pairs[c]->fd[0], msg, 1024, 0);
+								memset(imsg, 0, 1024);
+
 								if (strncmp(buf, "done", 4) == 0) {
 									memset(msg, 0, 1200);
 									sprintf(msg, "server hanging up\n");
@@ -336,7 +348,7 @@ int main(int argc, char *argv[])
 	config->addr.sin_addr.s_addr = htonl(INADDR_ANY); // config via file
 
 	struct epoll_event ev, events[SOMAXCONN];
-	int nfds, n, epollfd;
+	int nfds, n, epollfd, fl;
 
 	intercom = malloc(sizeof(comm_t));
 	intercom->len   = 0;
@@ -352,13 +364,19 @@ int main(int argc, char *argv[])
 			perror("opening stream socket pair");
 			exit(1);
 		}
+		fl = fcntl(intercom->pairs[intercom->len]->fd[0], F_GETFL);
+		fcntl(intercom->pairs[intercom->len]->fd[0], F_SETFL, fl|O_NONBLOCK|O_ASYNC);
+		fl = fcntl(intercom->pairs[intercom->len]->fd[1], F_GETFL);
+		fcntl(intercom->pairs[intercom->len]->fd[1], F_SETFL, fl|O_NONBLOCK|O_ASYNC);
+
 		ev.events  = EPOLLIN|EPOLLET;
 		ev.data.fd = intercom->pairs[intercom->len]->fd[0];
 		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, intercom->pairs[intercom->len]->fd[0], &ev) == -1) {
 			perror("failed to add listening socket to fd loop");
 			exit(EXIT_FAILURE);
 		}
-		pthread_create(threads + i, NULL, &server, (void *)&i);
+		int d = i;
+		pthread_create(threads + i, NULL, &server, (void *)&d);
 		intercom->len++;
 	}
 
