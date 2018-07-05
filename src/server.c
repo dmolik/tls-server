@@ -37,11 +37,16 @@ typedef struct {
 } server_t;
 
 typedef struct {
-	int    daemonize;
-	int    workers;
-	int    sessions;
-	struct sockaddr_in addr;
-	struct log {
+	int     daemonize;
+	int     workers;
+	int     sessions;
+	int     verbose;
+	char   *conf;
+	char   *pid;
+	char   *uid;
+	char   *gid;
+	struct  sockaddr_in addr;
+	struct  log {
 		FILE *facility;
 		char *identity;
 		int   level;
@@ -352,9 +357,14 @@ main(int argc, char *argv[])
 {
 	init_openssl();
 
-	config           = malloc(sizeof(config_t));
-	config->workers  = sysconf(_SC_NPROCESSORS_ONLN); // config via file
-	config->sessions = 1024;                          // config via file
+	config            = malloc(sizeof(config_t));
+	config->workers   = sysconf(_SC_NPROCESSORS_ONLN); // config via file
+	config->sessions  = 1024;                          // config via file
+	config->daemonize = 1;
+	config->verbose   = 0;
+	config->pid       = strdup("/run/tls-server.pid");
+	config->uid       = strdup("tlsserver");
+	config->gid       = strdup("tlsserver");
 
 	config->addr.sin_family      = AF_INET;
 	config->addr.sin_port        = htons(3003);       // config via file
@@ -398,29 +408,23 @@ main(int argc, char *argv[])
 			exit(EXIT_SUCCESS);
 
 		case 'v':
-			//server_c.verbose++;
+			config->verbose++;
 			break;
-
 		case 'F':
-			//server_c.daemonize = 0;
+			config->daemonize = 0;
 			break;
-
 		case 'c':
-			//server_c.conf = strdup(optarg);
+			config->conf = strdup(optarg);
 			break;
-
 		case 'p':
-			//server_c.pid = strdup(optarg);
+			config->pid = strdup(optarg);
 			break;
-
 		case 'u':
-			//server_c.uid = strdup(optarg);
+			config->uid = strdup(optarg);
 			break;
-
 		case 'g':
-			//server_c.gid = strdup(optarg);
+			config->gid = strdup(optarg);
 			break;
-
 		default:
 			fprintf(stderr, "unhandled option flag %#02x\n", c);
 			return 1;
