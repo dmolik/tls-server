@@ -18,6 +18,9 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+#include "log.h"
+#include "daemon.h"
+
 typedef struct {
 	int                 fd;
 	unsigned int        starttime;
