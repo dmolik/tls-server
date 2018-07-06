@@ -10,7 +10,6 @@ typedef struct {
 	int     workers;
 	int     sessions;
 	int     verbose;
-	int     port;
 	char   *address;
 	char   *conf;
 	char   *pid;

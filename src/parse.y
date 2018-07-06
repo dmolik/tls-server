@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <errno.h>
+#include <arpa/inet.h>
 
 #include "server.h"
 #include "config_file.h"
@@ -41,6 +42,9 @@ int  yyparse();
 %token LOGTYPE;
 %token FACILITY;
 %token PORT;
+%token KEY;
+%token CERT;
+%token SESSIONS;
 
 %%
 
@@ -50,11 +54,14 @@ configuration:
 	;
 
 config:
-	  PIDFILE STRING { p_config->pid     = $2; }
-	| USER    STRING { p_config->uid     = $2; }
-	| GROUP   STRING { p_config->gid     = $2; }
-	| WORKERS INT    { p_config->workers = $2; }
-	| PORT    INT    { p_config->port    = $2; }
+	  PIDFILE  STRING { p_config->pid           = $2;        }
+	| USER     STRING { p_config->uid           = $2;        }
+	| GROUP    STRING { p_config->gid           = $2;        }
+	| WORKERS  INT    { p_config->workers       = $2;        }
+	| SESSIONS INT    { p_config->sessions      = $2;        }
+	| PORT     INT    { p_config->addr.sin_port = htons($2); }
+	| KEY      STRING { p_config->certs.key     = $2;        }
+	| CERT     STRING { p_config->certs.chain   = $2;        }
 	;
 
 log_section:

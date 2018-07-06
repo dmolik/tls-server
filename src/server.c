@@ -359,8 +359,8 @@ main(int argc, char *argv[])
 	init_openssl();
 
 	config            = malloc(sizeof(config_t));
-	config->workers   = sysconf(_SC_NPROCESSORS_ONLN); // config via file
-	config->sessions  = 1024;                          // config via file
+	config->workers   = sysconf(_SC_NPROCESSORS_ONLN);
+	config->sessions  = 1024;
 	config->daemonize = 1;
 	config->verbose   = 0;
 	config->pid       = strdup("/run/tls-server.pid");
@@ -377,7 +377,7 @@ main(int argc, char *argv[])
 	config->log.facility = strdup("daemon");
 
 	config->addr.sin_family      = AF_INET;
-	config->addr.sin_port        = htons(3003);       // config via file
+	config->addr.sin_port        = htons(3003);
 	config->addr.sin_addr.s_addr = htonl(INADDR_ANY); // config via file
 	struct option long_opts[] = {
 		{ "help",             no_argument, NULL, 'h' },

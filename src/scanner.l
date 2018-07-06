@@ -39,15 +39,18 @@ STRING       ([0-9A-Za-z_\/:\.]+)
 
 <INITIAL>{
 	/* options */
-	pidfile  { return PIDFILE; }
-	user     { return USER; }
-	group    { return GROUP; }
-	workers  { return WORKERS; }
-	type     { return LOGTYPE; }
+	pidfile  { return PIDFILE;  }
+	user     { return USER;     }
+	group    { return GROUP;    }
+	workers  { return WORKERS;  }
+	sessions { return SESSIONS; }
+	type     { return LOGTYPE;  }
 	level    { return LOGLEVEL; }
 	facility { return FACILITY; }
-	port     { return PORT; }
-	log      { return LOG; }
+	port     { return PORT;     }
+	cert     { return CERT;     }
+	key      { return KEY;      }
+	log      { return LOG;      }
 }
 
 <LIST>{
