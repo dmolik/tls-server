@@ -8,9 +8,13 @@ endif
 
 BIN = server
 
+OBJS := src/main.o
+OBJS += src/daemon.o src/log.o
+OBJS += src/parse.o  src/scanner.o
+
 all: $(BIN)
 
-$(BIN): src/$(BIN).o src/main.o src/daemon.o src/log.o src/parse.o src/scanner.o
+$(BIN): src/$(BIN).o $(OBJS)
 	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
 ifeq ($(PERF), 1)
 	strip $(BIN)
