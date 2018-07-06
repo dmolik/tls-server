@@ -291,7 +291,12 @@ server(void *data)
 					logger(LOG_INFO, "[%d] now has %d sessions\n", id, sessions->peer_len);
 				} else if (events[n].data.fd == intercom->pairs[id]->fd[1]) {
 					char buf[1024];
-					read(intercom->pairs[id]->fd[1], buf, 1024);
+					int len;
+					if ((len = read(intercom->pairs[id]->fd[1], buf, 1024)) <= 0) {
+						if (errno != EAGAIN)
+							logger(LOG_WARNING, "[%d] intercom broadcast is crumulent (%i) [%s]", errno, strerror(errno));
+						continue;
+					}
 					if (strncmp("bcast", buf, 5) == 0) {
 						send_msg_all(sessions, buf + 5, 1024 - 5);
 					}
