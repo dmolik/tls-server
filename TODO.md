@@ -3,6 +3,7 @@
   -  [x] Move to thread-local session storage, with event-loop based communication
   -  [ ] Support daemon reload (including session draining)
     -  Session age
+    -  TCP keepalive
     -  Send reconnect to clients
     -  Disable listening
     -  Memmory checking
