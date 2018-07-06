@@ -20,11 +20,12 @@ ifeq ($(PERF), 1)
 	strip $(BIN)
 endif
 
-src/parse.c: src/parse.y
-	$(YACC) -d --output-file=$@ $<
-
-src/scanner.c: src/scanner.l
+src/scanner.c: src/scanner.l src/parse.h
 	$(LEX) --header-file --yylineno --outfile=$@ $<
+
+src/parse.h src/parse.c: src/parse.y
+	$(YACC) -d --output-file=src/parse.c $<
+
 
 src/%.o: src/%.c $(DEPS)
 	$(CC) $(CFLAGS) -c -o $@ $<
