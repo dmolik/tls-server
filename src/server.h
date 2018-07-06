@@ -27,4 +27,5 @@ typedef struct {
 	} log;
 } config_t;
 
+int serve(config_t *conf);
 #endif

@@ -10,7 +10,7 @@ BIN = server
 
 all: $(BIN)
 
-$(BIN): src/$(BIN).o src/daemon.o src/log.o src/parse.o src/scanner.o
+$(BIN): src/$(BIN).o src/main.o src/daemon.o src/log.o src/parse.o src/scanner.o
 	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
 ifeq ($(PERF), 1)
 	strip $(BIN)
