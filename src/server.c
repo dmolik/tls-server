@@ -21,6 +21,8 @@
 
 #include "log.h"
 #include "daemon.h"
+#include "server.h"
+#include "config_file.h"
 
 typedef struct {
 	int                 fd;
@@ -40,26 +42,6 @@ typedef struct {
 	SSL_CTX  *ctx;
 } server_t;
 
-typedef struct {
-	int     daemonize;
-	int     workers;
-	int     sessions;
-	int     verbose;
-	char   *conf;
-	char   *pid;
-	char   *uid;
-	char   *gid;
-	struct {
-		char *key;
-		char *chain;
-	} certs;
-	struct  sockaddr_in addr;
-	struct {
-		char *facility;
-		char *type;
-		char *level;
-	} log;
-} config_t;
 config_t  *config;
 
 typedef struct {
@@ -458,7 +440,10 @@ main(int argc, char *argv[])
 			return 1;
 		}
 	}
-
+	if (parse_config_file(config, config->conf) != 0) {
+		fprintf(stderr, "failed to parse config file\n");
+		exit(EXIT_FAILURE);
+	}
 	if (config->daemonize) {
 		log_open(PACKAGE, config->log.facility);
 		log_level(LOG_ERR + config->verbose, NULL);
@@ -493,18 +478,18 @@ main(int argc, char *argv[])
 		intercom->pairs[intercom->len] = malloc(sizeof(pair_t));
 		if (socketpair(AF_UNIX, SOCK_STREAM, 0, intercom->pairs[intercom->len]->fd) != 0) {
 			logger(LOG_ERR, "failed opening stream socket pair (%i) %s", errno, strerror(errno));
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 
 		fl = fcntl(intercom->pairs[intercom->len]->fd[0], F_GETFL);
 		if (fcntl(intercom->pairs[intercom->len]->fd[0], F_SETFL, fl|O_NONBLOCK|O_ASYNC) != 0) {
 			logger(LOG_ERR, "failed to set intercom pair non-blocking (%i) %s", errno, strerror(errno));
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 		fl = fcntl(intercom->pairs[intercom->len]->fd[1], F_GETFL);
 		if (fcntl(intercom->pairs[intercom->len]->fd[1], F_SETFL, fl|O_NONBLOCK|O_ASYNC) != 0) {
 			logger(LOG_ERR, "failed to set intercom pair non-blocking (%i) %s", errno, strerror(errno));
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 
 		ev.events  = EPOLLIN|EPOLLET;

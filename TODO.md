@@ -6,6 +6,10 @@
     -  Send reconnect to clients
     -  Disable listening
     -  Memmory checking
+  -  [ ] move setup into main.c
+  -  [ ] support an app.c for Business code
+  -  [ ] perl test harness ( requires client )
+  -  [ ] support ssl signing in testing
 
 ## IDEAS
 
@@ -14,4 +18,4 @@
   -  [x] Logging
   -  [x] CLI Options
   -  [ ] ENV Options
-  -  [ ] Config file
+  -  [x] Config file

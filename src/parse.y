@@ -3,11 +3,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <getopt.h>
+#include <errno.h>
 
+#include "server.h"
 #include "config_file.h"
-#include "../server.h"
 
-conf_t *p_config;
+config_t *p_config;
 
 int  yylex(void);
 void yyerror(char *str, ...);
@@ -85,7 +86,7 @@ int yywrap()
 	return 1;
 }
 
-int parse_config_file (conf_t *config_ref, const char *path)
+int parse_config_file (config_t *config_ref, const char *path)
 {
 	// parse the configuration file and store the results in the structure referenced
 	// error messages are output to stderr
@@ -94,7 +95,7 @@ int parse_config_file (conf_t *config_ref, const char *path)
 	extern FILE *yyin;
 	extern int yylineno;
 
-	p_config = malloc(sizeof(conf_t));
+	p_config = malloc(sizeof(config_t));
 	p_config = config_ref;
 
 	yyin = fopen (path, "r");
