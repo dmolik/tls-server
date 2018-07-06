@@ -321,9 +321,9 @@ server(void *data)
 								memset(imsg, 0, 1024);
 
 								if (strncmp(buf, "done", 4) == 0) {
-									memset(msg, 0, 1200);
+									memset(msg, 0, 1024);
 									sprintf(msg, "server hanging up\n");
-									send_msg(sessions, p, msg, 1200);
+									send_msg(sessions, p, msg, 1024);
 									logger(LOG_INFO, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 										ntohs(sessions->peers[p]->addr.sin_port), "closing connection for\n");
 									delete_client(server, sessions, p);
