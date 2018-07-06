@@ -16,14 +16,56 @@
   You should have received a copy of the GNU General Public License
   along with libvigor.  If not, see <http://www.gnu.org/licenses/>.
  */
+#define _GNU_SOURCE
+#include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdarg.h>
 
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <pwd.h>
+#include <grp.h>
+
+#include <fcntl.h>
+#include <assert.h>
+#include <errno.h>
+
+
+int cleanenv(int n, const char **keep)
+{
+	extern char **environ;
+	/* clean up the environment */
+	int i, j;
+	for (i = 0; environ[i]; i++) {
+		int skip = 0;
+		for (j = 0; j < n; j++) {
+			size_t len = strlen(keep[j]);
+			if (strncmp(environ[i], keep[j], len) == 0
+			 && environ[i][len] == '=') {
+				skip = 1;
+				break;
+			}
+		}
+
+		if (skip)
+			continue;
+
+		char *equals = strchr(environ[i], '=');
+		char *name = calloc(equals - environ[i] + 1, sizeof(char));
+		memcpy(name, environ[i], equals - environ[i]);
+		unsetenv(name);
+		free(name);
+	}
+	return 0;
+}
 
 int daemonize(const char *pidfile, const char *user, const char *group)
 {
 	umask(0);
 
-	size_t n;
-	int rc;
+	int rc, n;
 	int fd = -1;
 	if (pidfile) {
 		fd = open(pidfile, O_RDWR|O_CREAT, S_IRUSR|S_IWUSR);
@@ -86,7 +128,7 @@ int daemonize(const char *pidfile, const char *user, const char *group)
 
 	if (pidfile) {
 		struct flock lock;
-		size_t n;
+		int n;
 
 		lock.l_type   = F_WRLCK;
 		lock.l_whence = SEEK_SET;
@@ -103,7 +145,7 @@ int daemonize(const char *pidfile, const char *user, const char *group)
 			n = write(pfds[1], error, strlen(error));
 			if (n < 0)
 				perror("failed to inform parent of our error condition");
-			if (n < strlen(error))
+			if (n < (int) strlen(error))
 				fprintf(stderr, "child->parent inform - only wrote %li of %li bytes\n",
 					(long)n, (long)strlen(error));
 			exit(2);
@@ -121,7 +163,7 @@ int daemonize(const char *pidfile, const char *user, const char *group)
 		n = write(fd, buf, strlen(buf));
 		if (n < 0)
 			perror("failed to write PID to pidfile");
-		if (n < strlen(buf))
+		if (n < (int)strlen(buf))
 			fprintf(stderr, "only wrote %li of %li bytes to pidfile\n",
 				(long)n, (long)strlen(error));
 		rc = fsync(fd);
@@ -155,33 +197,5 @@ int daemonize(const char *pidfile, const char *user, const char *group)
 		perror("Failed to reopen stderr >/dev/null");
 	close(pfds[1]);
 
-	return 0;
-}
-
-int cleanenv(int n, const char **keep)
-{
-	extern char **environ;
-	/* clean up the environment */
-	int i, j;
-	for (i = 0; environ[i]; i++) {
-		int skip = 0;
-		for (j = 0; j < n; j++) {
-			size_t len = strlen(keep[j]);
-			if (strncmp(environ[i], keep[j], len) == 0
-			 && environ[i][len] == '=') {
-				skip = 1;
-				break;
-			}
-		}
-
-		if (skip)
-			continue;
-
-		char *equals = strchr(environ[i], '=');
-		char *name = calloc(equals - environ[i] + 1, sizeof(char));
-		memcpy(name, environ[i], equals - environ[i]);
-		unsetenv(name);
-		free(name);
-	}
 	return 0;
 }

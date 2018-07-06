@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 
 #include <fcntl.h>
@@ -48,11 +49,15 @@ typedef struct {
 	char   *pid;
 	char   *uid;
 	char   *gid;
+	struct {
+		char *key;
+		char *chain;
+	} certs;
 	struct  sockaddr_in addr;
-	struct  log {
-		FILE *facility;
-		char *identity;
-		int   level;
+	struct {
+		char *facility;
+		char *type;
+		char *level;
 	} log;
 } config_t;
 config_t  *config;
@@ -73,7 +78,7 @@ create_socket(void)
 
 	s = socket(config->addr.sin_family, SOCK_STREAM, 0);
 	if (s < 0) {
-		perror("Unable to create socket");
+		logger(LOG_ERR, "Unable to create socket (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	int opt = 1;
@@ -86,12 +91,12 @@ create_socket(void)
 	fcntl(s, F_SETFL, fl|O_NONBLOCK|O_ASYNC);
 
 	if (bind(s, (struct sockaddr*)&(config->addr), sizeof(struct sockaddr_in)) < 0) {
-		perror("Unable to bind");
+		logger(LOG_ERR, "Unable to bind (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 
 	if (listen(s, SOMAXCONN) < 0) {
-		perror("Unable to listen");
+		logger(LOG_ERR, "Unable to listen (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 
@@ -115,13 +120,15 @@ SSL_CTX *create_context()
 {
 	const SSL_METHOD *method;
 	SSL_CTX *ctx;
+	//FILE *fp;
 
-	method = SSLv23_server_method();
+	method = TLSv1_server_method();
 
 	ctx = SSL_CTX_new(method);
 	if (!ctx) {
-		perror("Unable to create SSL context");
-		ERR_print_errors_fp(stderr);
+		//logger(LOG_ERR, "Unable to create SSL context (%i) %s", errno, strerror(errno));
+		//ERR_print_errors_fp(fp);
+		//logger(LOG_ERR, "%s", fp);
 		exit(EXIT_FAILURE);
 	}
 
@@ -132,8 +139,8 @@ void
 configure_context(SSL_CTX *ctx)
 {
 	SSL_CTX_set_ecdh_auto(ctx, 1);
-
 	const long flags = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_COMPRESSION;
+	logger(LOG_DEBUG, "Setting TLS CTX flags");
 	SSL_CTX_set_options(ctx, flags);
 	const char *PREFERRED_CIPHERS =
 		"kEECDH+ECDSA+AES256:EECDH+RSA+AES256+GCM+SHA384"
@@ -142,13 +149,17 @@ configure_context(SSL_CTX *ctx)
 		":!LOW:!CAMELLIA"; // this should probably be configurable
 	SSL_CTX_set_cipher_list(ctx, PREFERRED_CIPHERS);
 
-	if (SSL_CTX_use_certificate_chain_file(ctx, "cert.pem") <= 0) {
-		ERR_print_errors_fp(stderr);
+	logger(LOG_DEBUG, "loading cert chain file");
+	if (SSL_CTX_use_certificate_chain_file(ctx, config->certs.chain) <= 0) {
+		logger(LOG_ERR, "failed to load cert file(%s) [%s]",
+			config->certs.chain, ERR_error_string(ERR_get_error(), NULL));
 		exit(EXIT_FAILURE);
 	}
 
-	if (SSL_CTX_use_PrivateKey_file(ctx, "key.pem", SSL_FILETYPE_PEM) <= 0 ) {
-		ERR_print_errors_fp(stderr);
+	logger(LOG_DEBUG, "loading key file");
+	if (SSL_CTX_use_PrivateKey_file(ctx, config->certs.key, SSL_FILETYPE_PEM) <= 0 ) {
+		logger(LOG_ERR, "failed to load key file(%s) [%s]",
+			config->certs.key, ERR_error_string(ERR_get_error(), NULL));
 		exit(EXIT_FAILURE);
 	}
 }
@@ -162,22 +173,22 @@ add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_addr,
 
 	int op =1;
 	if (setsockopt(sessions->peers[sessions->peer_len]->fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&op, sizeof(op))) {
-		perror("setsocketopt(), SO_KEEPALIVE");
+		logger(LOG_ERR, "setsocketopt(), SO_KEEPALIVE (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	op = 10;
 	if (setsockopt(sessions->peers[sessions->peer_len]->fd, SOL_TCP, TCP_KEEPIDLE, (void *)&op, sizeof(op))) {
-		perror("setsocketopt(), SO_KEEPALIVE");
+		logger(LOG_ERR, "setsocketopt(), SO_KEEPIDLE (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	op = 5;
 	if (setsockopt(sessions->peers[sessions->peer_len]->fd, SOL_TCP, TCP_KEEPCNT, (void *)&op, sizeof(op))) {
-		perror("setsocketopt(), SO_KEEPALIVE");
+		logger(LOG_ERR, "setsocketopt(), SO_KEEPCNT (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	op = 5;
 	if (setsockopt(sessions->peers[sessions->peer_len]->fd, SOL_TCP, TCP_KEEPINTVL, (void *)&op, sizeof(op))) {
-		perror("setsocketopt(), SO_KEEPALIVE");
+		logger(LOG_ERR, "setsocketopt(), SO_KEEPINTVAL (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 
@@ -193,10 +204,10 @@ add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_addr,
 	ev.events = EPOLLIN|EPOLLET;
 	ev.data.fd = sessions->peers[sessions->peer_len]->fd;
 	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, sessions->peers[sessions->peer_len]->fd, &ev) == -1) {
-		perror("failed to add peer socket to fd loop");
+		logger(LOG_ERR, "failed to add peer socket to fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-	printf("Client connected from %s:%u\n", inet_ntoa(sessions->peers[sessions->peer_len]->addr.sin_addr),
+	logger(LOG_INFO, "Client connected from %s:%u\n", inet_ntoa(sessions->peers[sessions->peer_len]->addr.sin_addr),
 		ntohs(sessions->peers[sessions->peer_len]->addr.sin_port));
 	sessions->peer_len++;
 
@@ -251,33 +262,38 @@ server(void *data)
 	struct sockaddr_in peer_addr;
 	socklen_t peer_addr_size = sizeof(struct sockaddr_in);
 
+	logger(LOG_DEBUG, "[%d] building socket", id);
 	server->fd = create_socket();
 
+	logger(LOG_DEBUG, "[%d] building TLS context", id);
 	server->ctx = create_context();
+	logger(LOG_DEBUG, "[%d] configuring TLS context", id);
 	configure_context(server->ctx);
 
+	logger(LOG_DEBUG, "[%d] constructing event loop", id);
 	struct epoll_event ev, events[SOMAXCONN];
 	int nfds, n, p, peer_fd;
 
 	if ((server->epollfd = epoll_create1(0)) == -1) {
-		perror("failed to create fd loop");
+		logger(LOG_ERR, "failed to create fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	ev.events = EPOLLIN|EPOLLET;
 	ev.data.fd = server->fd;
 	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, server->fd, &ev) == -1) {
-		perror("failed to add listening socket to fd loop");
+		logger(LOG_ERR, "failed to add listening socket to fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 
 	ev.data.fd = intercom->pairs[id]->fd[1];
 	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, intercom->pairs[id]->fd[1], &ev) == -1) {
-		perror("failed to add listening socket to fd loop");
+		logger(LOG_ERR, "failed to add listening socket to fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
+	logger(LOG_DEBUG, "[%d] Added event loop", id);
 	for (;;) {
 		if ((nfds = epoll_wait(server->epollfd, events, SOMAXCONN, -1)) == -1) {
-			perror("catastropic epoll_wait");
+			logger(LOG_ERR, "catastropic epoll_wait (%i) %s", errno, strerror(errno));
 			exit(EXIT_FAILURE);
 		}
 
@@ -288,12 +304,12 @@ server(void *data)
 						if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
 							continue; // break;
 						} else {
-							perror("unable to accept connections");
+							logger(LOG_ERR, "unable to accept connections (%i) %s", errno, strerror(errno));
 							exit(EXIT_FAILURE);
 						}
 					}
 					add_client(server, sessions, peer_addr, peer_fd);
-					printf("[%d] now has %d sessions\n", id, sessions->peer_len);
+					logger(LOG_INFO, "[%d] now has %d sessions\n", id, sessions->peer_len);
 				} else if (events[n].data.fd == intercom->pairs[id]->fd[1]) {
 					char buf[1024];
 					read(intercom->pairs[id]->fd[1], buf, 1024);
@@ -309,7 +325,7 @@ server(void *data)
 							len = SSL_read(sessions->peers[p]->ssl, buf, 1024);
 							if (len > 0) {
 								char msg[1024];
-								printf("%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
+								logger(LOG_INFO, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
 								sprintf(msg, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
@@ -326,18 +342,18 @@ server(void *data)
 									memset(msg, 0, 1200);
 									sprintf(msg, "server hanging up\n");
 									send_msg(sessions, p, msg, 1200);
-									printf("%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
+									logger(LOG_INFO, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 										ntohs(sessions->peers[p]->addr.sin_port), "closing connection for\n");
 									delete_client(server, sessions, p);
-									printf("[%d] now has %d sessions\n", id, sessions->peer_len);
+									logger(LOG_INFO, "[%d] now has %d sessions\n", id, sessions->peer_len);
 								}
 								//free(msg);
 							} else if (len <= 0) {
 								if (errno != EAGAIN) {
-									printf("%s:%u - hangup\n", inet_ntoa(sessions->peers[p]->addr.sin_addr),
+									logger(LOG_INFO, "%s:%u - hangup\n", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 										ntohs(sessions->peers[p]->addr.sin_port));
 									delete_client(server, sessions, p);
-									printf("[%d] now has %d sessions\n", id, sessions->peer_len);
+									logger(LOG_INFO, "[%d] now has %d sessions\n", id, sessions->peer_len);
 								}
 							}
 							memset(buf, 0, 1024);
@@ -368,6 +384,15 @@ main(int argc, char *argv[])
 	config->pid       = strdup("/run/tls-server.pid");
 	config->uid       = strdup("tlsserver");
 	config->gid       = strdup("tlsserver");
+
+	config->certs.chain = strdup("/path-to-tls-certs/cert.pem");
+	config->certs.key   = strdup("/path-to-tls-certs/key.pem");
+
+
+	const char *PACKAGE = "server";
+	config->log.type     = strdup("syslog");
+	config->log.level    = strdup("info");
+	config->log.facility = strdup("daemon");
 
 	config->addr.sin_family      = AF_INET;
 	config->addr.sin_port        = htons(3003);       // config via file
@@ -434,6 +459,24 @@ main(int argc, char *argv[])
 		}
 	}
 
+	if (config->daemonize) {
+		log_open(PACKAGE, config->log.facility);
+		log_level(LOG_ERR + config->verbose, NULL);
+
+		mode_t um = umask(0);
+		if (daemonize(config->pid, config->uid, config->gid) != 0) {
+			fprintf(stderr, "daemonization failed: (%i) %s\n", errno, strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+		umask(um);
+	} else {
+		log_open(PACKAGE, "console");
+		log_level(LOG_ERR + config->verbose, NULL);
+		if (!freopen("/dev/null", "r", stdin))
+			logger(LOG_WARNING, "failed to reopen stdin </dev/null: %s", strerror(errno));
+	}
+	logger(LOG_INFO, "starting up");
+
 	struct epoll_event ev, events[SOMAXCONN];
 	int nfds, n, epollfd, fl;
 
@@ -441,33 +484,40 @@ main(int argc, char *argv[])
 	intercom->len   = 0;
 	intercom->pairs = malloc(sizeof(pair_t*) * config->workers);
 	if ((epollfd = epoll_create1(0)) == -1) {
-		perror("failed to create fd loop");
+		logger(LOG_ERR, "failed to create fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
+	logger(LOG_DEBUG, "spooling %d workers", config->workers);
 	pthread_t threads[config->workers];
 	for (int i = 0; i < config->workers; i++) {
 		intercom->pairs[intercom->len] = malloc(sizeof(pair_t));
-		if (socketpair(AF_UNIX, SOCK_STREAM, 0, intercom->pairs[intercom->len]->fd) < 0) {
-			perror("opening stream socket pair");
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, intercom->pairs[intercom->len]->fd) != 0) {
+			logger(LOG_ERR, "failed opening stream socket pair (%i) %s", errno, strerror(errno));
 			exit(1);
 		}
 
 		fl = fcntl(intercom->pairs[intercom->len]->fd[0], F_GETFL);
-		fcntl(intercom->pairs[intercom->len]->fd[0], F_SETFL, fl|O_NONBLOCK|O_ASYNC);
+		if (fcntl(intercom->pairs[intercom->len]->fd[0], F_SETFL, fl|O_NONBLOCK|O_ASYNC) != 0) {
+			logger(LOG_ERR, "failed to set intercom pair non-blocking (%i) %s", errno, strerror(errno));
+			exit(1);
+		}
 		fl = fcntl(intercom->pairs[intercom->len]->fd[1], F_GETFL);
-		fcntl(intercom->pairs[intercom->len]->fd[1], F_SETFL, fl|O_NONBLOCK|O_ASYNC);
+		if (fcntl(intercom->pairs[intercom->len]->fd[1], F_SETFL, fl|O_NONBLOCK|O_ASYNC) != 0) {
+			logger(LOG_ERR, "failed to set intercom pair non-blocking (%i) %s", errno, strerror(errno));
+			exit(1);
+		}
 
 		ev.events  = EPOLLIN|EPOLLET;
 		ev.data.fd = intercom->pairs[intercom->len]->fd[0];
 		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, intercom->pairs[intercom->len]->fd[0], &ev) == -1) {
-			perror("failed to add listening socket to fd loop");
+			logger(LOG_ERR, "failed to add listening socket to fd loop (%i) %s", errno, strerror(errno));
 			exit(EXIT_FAILURE);
 		}
 		int d = i;
 		pthread_create(threads + i, NULL, &server, (void *)&d);
 		intercom->len++;
 	}
-
+	logger(LOG_DEBUG, "main thread initialized");
 	for (;;) {
 		if ((nfds = epoll_wait(epollfd, events, SOMAXCONN, -1)) == -1) {
 			for (n = 0; n < nfds; ++n) {

@@ -10,8 +10,8 @@
 ## IDEAS
 
   -  [ ] Error Checking
-  -  [ ] Daemon
-  -  [ ] Logging
+  -  [x] Daemon
+  -  [x] Logging
   -  [x] CLI Options
   -  [ ] ENV Options
   -  [ ] Config file

@@ -17,17 +17,29 @@
   along with libvigor.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 #include <assert.h>
 #include <errno.h>
 
 #include <syslog.h>
 #include "log.h"
+
+static struct {
+	FILE *console;
+	char *ident;
+	int   level;
+} LIBVIGOR_LOG = {
+	.console = NULL,
+	.ident   = NULL,
+	.level   = LOG_INFO
+};
 
 void log_open(const char *ident, const char *facility)
 {
@@ -140,7 +152,6 @@ void logger(int level, const char *fmt, ...)
 	va_start(ap1, fmt);
 	va_copy(ap2, ap1);
 	size_t n = vsnprintf(NULL, 0, fmt, ap1);
-	assert(n >= 0);
 	va_end(ap1);
 
 	char *msg = calloc(n + 1, sizeof(char));
