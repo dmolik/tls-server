@@ -30,10 +30,5 @@ src/parse.h src/parse.c: src/parse.y
 src/%.o: src/%.c $(DEPS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-
-exp: pairs
-pairs:
-	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ exp/$@.c
-
 clean:
 	rm -f src/*.o src/scanner.c src/parse.c src/parse.h $(BIN) pairs
