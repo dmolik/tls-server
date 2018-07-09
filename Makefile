@@ -6,15 +6,23 @@ LDFLAGS := -Wl,--as-needed -Wl,--hash-style=gnu
 CFLAGS  += -O3 -march=native -mtune=native -flto=8
 endif
 
-BIN = server
+SERVER = server
+CLIENT = client
 
-OBJS := src/main.o
 OBJS += src/daemon.o src/log.o src/utils.o
-OBJS += src/parse.o  src/scanner.o
 
-all: $(BIN)
+SERVER_OBJS = $(OBJS) src/parse.o src/scanner.o src/main.o
+CLIENT_OBJS = $(OBJS)
 
-$(BIN): src/$(BIN).o $(OBJS)
+all: $(SERVER) $(CLIENT)
+
+$(SERVER): src/$(SERVER).o $(SERVER_OBJS)
+	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
+ifeq ($(PERF), 1)
+	strip $(BIN)
+endif
+
+$(CLIENT): src/$(CLIENT).o $(CLIENT_OBJS)
 	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
 ifeq ($(PERF), 1)
 	strip $(BIN)
