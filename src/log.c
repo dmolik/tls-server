@@ -17,7 +17,6 @@
   along with libvigor.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define _GNU_SOURCE
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
@@ -29,13 +28,14 @@
 #include <errno.h>
 
 #include <syslog.h>
+#include "utils.h"
 #include "log.h"
 
 static struct {
 	FILE *console;
 	char *ident;
 	int   level;
-} LIBVIGOR_LOG = {
+} SERVER_LOG = {
 	.console = NULL,
 	.ident   = NULL,
 	.level   = LOG_INFO
@@ -46,72 +46,76 @@ void log_open(const char *ident, const char *facility)
 	assert(ident);
 	assert(facility);
 
-	free(LIBVIGOR_LOG.ident);
-	LIBVIGOR_LOG.ident = strdup(ident);
-	assert(LIBVIGOR_LOG.ident);
+	free(SERVER_LOG.ident);
+	SERVER_LOG.ident = strdup(ident);
+	assert(SERVER_LOG.ident);
 
 	if (strcmp(facility, "stdout") == 0) {
-		LIBVIGOR_LOG.console = stdout;
+		SERVER_LOG.console = stdout;
 		return;
 	}
 	if (strcmp(facility, "stderr")  == 0
 	 || strcmp(facility, "console") == 0) {
-		LIBVIGOR_LOG.console = stderr;
+		SERVER_LOG.console = stderr;
 		return;
 	}
 
 	if (strncmp(facility, "file:", 5) == 0) {
 		char *path = strchr(facility, ':'); path++;
-		LIBVIGOR_LOG.console = fopen(path, "w+");
+		SERVER_LOG.console = fopen(path, "w+");
 		return;
 	}
 
-	int fac = strcmp(facility, "local0") == 0 ? LOG_LOCAL0
-	        : strcmp(facility, "local1") == 0 ? LOG_LOCAL1
-	        : strcmp(facility, "local2") == 0 ? LOG_LOCAL2
-	        : strcmp(facility, "local3") == 0 ? LOG_LOCAL3
-	        : strcmp(facility, "local4") == 0 ? LOG_LOCAL4
-	        : strcmp(facility, "local5") == 0 ? LOG_LOCAL5
-	        : strcmp(facility, "local6") == 0 ? LOG_LOCAL6
-	        : strcmp(facility, "local7") == 0 ? LOG_LOCAL7
-	        :                                   LOG_DAEMON;
+	int fac = strncmp(facility, "local0", 6) == 0 ? LOG_LOCAL0
+	        : strncmp(facility, "local1", 6) == 0 ? LOG_LOCAL1
+	        : strncmp(facility, "local2", 6) == 0 ? LOG_LOCAL2
+	        : strncmp(facility, "local3", 6) == 0 ? LOG_LOCAL3
+	        : strncmp(facility, "local4", 6) == 0 ? LOG_LOCAL4
+	        : strncmp(facility, "local5", 6) == 0 ? LOG_LOCAL5
+	        : strncmp(facility, "local6", 6) == 0 ? LOG_LOCAL6
+	        : strncmp(facility, "local7", 6) == 0 ? LOG_LOCAL7
+	        : strncmp(facility, "auth",   4) == 0 ? LOG_AUTH
+	        : strncmp(facility, "user",   4) == 0 ? LOG_USER
+	        : strncmp(facility, "mail",   4) == 0 ? LOG_MAIL
+	        : strncmp(facility, "news",   4) == 0 ? LOG_NEWS
+	        :                                       LOG_DAEMON;
 
-	LIBVIGOR_LOG.console = NULL;
+	SERVER_LOG.console = NULL;
 	closelog();
-	openlog(LIBVIGOR_LOG.ident, LOG_PID, fac);
+	openlog(SERVER_LOG.ident, LOG_PID, fac);
 }
 
 void log_close(void)
 {
-	if (LIBVIGOR_LOG.console) {
-		fclose(LIBVIGOR_LOG.console);
-		LIBVIGOR_LOG.console = NULL;
+	if (SERVER_LOG.console) {
+		fclose(SERVER_LOG.console);
+		SERVER_LOG.console = NULL;
 	} else {
 		closelog();
 	}
 
-	free(LIBVIGOR_LOG.ident);
-	LIBVIGOR_LOG.ident = NULL;
+	free(SERVER_LOG.ident);
+	SERVER_LOG.ident = NULL;
 }
 
 int log_level(int level, const char *name)
 {
-	int was = LIBVIGOR_LOG.level;
+	int was = SERVER_LOG.level;
 	if (name) {
 		level = log_level_number(name);
-		if (level < 0) level = LIBVIGOR_LOG.level;
+		if (level < 0) level = SERVER_LOG.level;
 	}
 	if (level >= 0) {
 		if (level > LOG_DEBUG)
 			level = LOG_DEBUG;
-		LIBVIGOR_LOG.level = level;
+		SERVER_LOG.level = level;
 	}
 	return was;
 }
 
 const char* log_level_name(int level)
 {
-	if (level < 0) level = LIBVIGOR_LOG.level;
+	if (level < 0) level = SERVER_LOG.level;
 	switch (level) {
 	case LOG_EMERG:   return "emergency";
 	case LOG_ALERT:   return "alert";
@@ -145,7 +149,7 @@ int log_level_number(const char *name)
 
 void logger(int level, const char *fmt, ...)
 {
-	if (level > LIBVIGOR_LOG.level)
+	if (level > SERVER_LOG.level)
 		return;
 
 	va_list ap1, ap2;
@@ -160,15 +164,15 @@ void logger(int level, const char *fmt, ...)
 	msg[n] = '\0';
 	va_end(ap2);
 
-	if (LIBVIGOR_LOG.console) {
+	if (SERVER_LOG.console) {
 		assert(level >= 0 && level <= LOG_DEBUG);
 
 		pid_t pid = getpid();
 		assert(pid);
 
-		fprintf(LIBVIGOR_LOG.console, "%s[%i] %s\n",
-				LIBVIGOR_LOG.ident, pid, msg);
-		fflush(LIBVIGOR_LOG.console);
+		fprintf(SERVER_LOG.console, "%s[%i] %s\n",
+				SERVER_LOG.ident, pid, msg);
+		fflush(SERVER_LOG.console);
 	} else {
 		syslog(level, "%s", msg);
 	}

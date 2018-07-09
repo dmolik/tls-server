@@ -16,7 +16,8 @@
   You should have received a copy of the GNU General Public License
   along with libvigor.  If not, see <http://www.gnu.org/licenses/>.
  */
-#define _GNU_SOURCE
+
+#define  _GNU_SOURCE
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>

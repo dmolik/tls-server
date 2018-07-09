@@ -20,11 +20,14 @@
 %{
 #include "config_file.h"
 #include <string.h>
+#include <stdio.h>
+#include "utils.h"
 #include "parse.h"
 %}
 
 %option yylineno
 %option noinput nounput
+%option never-interactive
 
 %x LIST
 

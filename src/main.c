@@ -10,6 +10,7 @@
 #include "log.h"
 #include "server.h"
 #include "daemon.h"
+#include "utils.h"
 #include "config_file.h"
 
 int
