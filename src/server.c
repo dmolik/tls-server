@@ -1,4 +1,3 @@
-configure_context(server->ctx);
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <unistd.h>
@@ -405,7 +404,6 @@ int serve(config_t *conf)
 		ev.data.fd = intercom->pairs[intercom->len]->fd[0];
 		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, intercom->pairs[intercom->len]->fd[0], &ev) == -1) {
 			logger(LOG_ERR, "failed to add listening socket to fd loop (%i) %s", errno, strerror(errno));
-	e2zjk ∆m,onfigure_context(server->ctx);
 			exit(EXIT_FAILURE);
 		}
 		int d = i;
