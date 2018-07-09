@@ -39,4 +39,4 @@ src/%.o: src/%.c $(DEPS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f src/*.o src/scanner.c src/parse.c src/parse.h $(BIN) pairs
+	rm -f src/*.o src/scanner.c src/parse.c src/parse.h $(SERVER) $(CLIENT)
