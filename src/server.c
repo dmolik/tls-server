@@ -1,3 +1,4 @@
+configure_context(server->ctx);
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <unistd.h>
@@ -99,24 +100,15 @@ SSL_CTX *create_context()
 {
 	const SSL_METHOD *method;
 	SSL_CTX *ctx;
-	//FILE *fp;
 
 	method = TLSv1_server_method();
 
-	ctx = SSL_CTX_new(method);
-	if (!ctx) {
-		//logger(LOG_ERR, "Unable to create SSL context (%i) %s", errno, strerror(errno));
-		//ERR_print_errors_fp(fp);
-		//logger(LOG_ERR, "%s", fp);
+	if (!(ctx = SSL_CTX_new(method))) {
+		logger(LOG_ERR, "failed to create TLS context [%s]",
+			ERR_error_string(ERR_get_error(), NULL));
 		exit(EXIT_FAILURE);
 	}
 
-	return ctx;
-}
-
-void
-configure_context(SSL_CTX *ctx)
-{
 	SSL_CTX_set_ecdh_auto(ctx, 1);
 	const long flags = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_COMPRESSION;
 	logger(LOG_DEBUG, "Setting TLS CTX flags");
@@ -141,11 +133,16 @@ configure_context(SSL_CTX *ctx)
 			config->certs.key, ERR_error_string(ERR_get_error(), NULL));
 		exit(EXIT_FAILURE);
 	}
+
+	return ctx;
 }
 
 int
 add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_addr, int peer_fd) {
-	sessions->peers[sessions->peer_len]     = malloc(sizeof(peer_t));
+	if ((sessions->peers[sessions->peer_len] = malloc(sizeof(peer_t))) == NULL) {
+		logger(LOG_ERR, "failed to add session (mem)");
+		exit(EXIT_FAILURE);
+	}
 	sessions->peers[sessions->peer_len]->fd = peer_fd;
 	int fl = fcntl(sessions->peers[sessions->peer_len]->fd, F_GETFL);
 	fcntl(sessions->peers[sessions->peer_len]->fd, F_SETFL, fl|O_NONBLOCK|O_ASYNC);
@@ -230,24 +227,29 @@ send_msg_all(sessions_t *sessions, char *msg, int msg_size)
 static void *
 server(void *data)
 {
-	int id           = *((int *)data);
-	server_t *server = malloc(sizeof(server_t));
-
+	int id = *((int *)data);
+	server_t *server;
+	if ((server = malloc(sizeof(server_t))) == NULL) {
+		logger(LOG_ERR, "[%d[ failed to allocate thread configuration (mem)", id);
+		exit(EXIT_FAILURE);
+	}
 	sessions_t *sessions;
-	sessions           = malloc(sizeof(sessions_t));
+	if ((sessions = malloc(sizeof(sessions_t))) == NULL) {
+		logger(LOG_ERR, "[%d[ failed to allocate session configuration (mem)", id);
+		exit(EXIT_FAILURE);
+	}
 	sessions->peer_len = 0;
-	sessions->peers    = malloc(sizeof(peer_t*) * config->sessions);
+	if ((sessions->peers = malloc(sizeof(peer_t*) * config->sessions)) == NULL) {
+		logger(LOG_ERR, "[%d[ failed to allocate session storage (mem)", id);
+		exit(EXIT_FAILURE);
+	}
 
 	struct sockaddr_in peer_addr;
 	socklen_t peer_addr_size = sizeof(struct sockaddr_in);
 
-	logger(LOG_DEBUG, "[%d] building socket", id);
 	server->fd = create_socket();
 
-	logger(LOG_DEBUG, "[%d] building TLS context", id);
 	server->ctx = create_context();
-	logger(LOG_DEBUG, "[%d] configuring TLS context", id);
-	configure_context(server->ctx);
 
 	logger(LOG_DEBUG, "[%d] constructing event loop", id);
 	struct epoll_event ev, events[SOMAXCONN];
@@ -363,9 +365,15 @@ int serve(config_t *conf)
 	struct epoll_event ev, events[SOMAXCONN];
 	int nfds, n, epollfd, fl;
 
-	intercom = malloc(sizeof(comm_t));
+	if ((intercom = malloc(sizeof(comm_t))) == NULL) {
+		logger(LOG_ERR, "failed to allocate global intercom (mem)");
+		exit(EXIT_FAILURE);
+	}
 	intercom->len   = 0;
-	intercom->pairs = malloc(sizeof(pair_t*) * config->workers);
+	if ((intercom->pairs = malloc(sizeof(pair_t*) * config->workers)) == NULL) {
+		logger(LOG_ERR, "failed to allocate intercom pairs (mem)");
+		exit(EXIT_FAILURE);
+	}
 	if ((epollfd = epoll_create1(0)) == -1) {
 		logger(LOG_ERR, "failed to create fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
@@ -373,7 +381,10 @@ int serve(config_t *conf)
 	logger(LOG_DEBUG, "spooling %d workers", config->workers);
 	pthread_t threads[config->workers];
 	for (int i = 0; i < config->workers; i++) {
-		intercom->pairs[intercom->len] = malloc(sizeof(pair_t));
+		if ((intercom->pairs[intercom->len] = malloc(sizeof(pair_t))) == NULL) {
+			logger(LOG_ERR, "failed to allocate intercom pair (mem)");
+			exit(EXIT_FAILURE);
+		}
 		if (socketpair(AF_UNIX, SOCK_STREAM, 0, intercom->pairs[intercom->len]->fd) != 0) {
 			logger(LOG_ERR, "failed opening stream socket pair (%i) %s", errno, strerror(errno));
 			exit(EXIT_FAILURE);
@@ -394,6 +405,7 @@ int serve(config_t *conf)
 		ev.data.fd = intercom->pairs[intercom->len]->fd[0];
 		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, intercom->pairs[intercom->len]->fd[0], &ev) == -1) {
 			logger(LOG_ERR, "failed to add listening socket to fd loop (%i) %s", errno, strerror(errno));
+	e2zjk ∆m,onfigure_context(server->ctx);
 			exit(EXIT_FAILURE);
 		}
 		int d = i;
