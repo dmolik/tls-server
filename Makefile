@@ -1,4 +1,4 @@
-CFLAGS  := -Wall -Wextra -pipe -pedantic -std=c99
+CFLAGS  := -Wall -Wextra -pipe -pedantic -std=c99 -g
 LIBS    := -lcrypto -lssl -lpthread
 PERF    ?=
 ifeq ($(PERF), 1)
@@ -30,13 +30,13 @@ endif
 
 src/scanner.c: src/scanner.l src/parse.c
 	$(LEX) --header-file --yylineno --outfile=$@ $<
-
 src/parse.c: src/parse.y
 	$(YACC) -d --output-file=src/parse.c $<
-
-
 src/%.o: src/%.c $(DEPS)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+scan: clean
+	scan-build -v make all
 
 clean:
 	rm -f src/*.o src/scanner.c src/parse.c src/parse.h $(SERVER) $(CLIENT)

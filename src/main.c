@@ -21,6 +21,7 @@ main(int argc, char *argv[])
 	config->sessions  = 1024;
 	config->daemonize = 1;
 	config->verbose   = 0;
+	config->conf      = strdup("/etc/tls-server.conf");
 	config->pid       = strdup("/run/tls-server.pid");
 	config->uid       = strdup("tlsserver");
 	config->gid       = strdup("tlsserver");
@@ -85,15 +86,16 @@ main(int argc, char *argv[])
 			config->conf = strdup(optarg);
 			break;
 		case 'p':
-			config->pid = strdup(optarg);
+			config->pid  = strdup(optarg);
 			break;
 		case 'u':
-			config->uid = strdup(optarg);
+			config->uid  = strdup(optarg);
 			break;
 		case 'g':
-			config->gid = strdup(optarg);
+			config->gid  = strdup(optarg);
 			break;
 		default:
+			free(config);
 			fprintf(stderr, "unhandled option flag %#02x\n", c);
 			return 1;
 		}

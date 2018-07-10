@@ -198,7 +198,7 @@ delete_client(server_t *server, sessions_t *sessions, int p)
 	epoll_ctl(server->epollfd, EPOLL_CTL_DEL, sessions->peers[p]->fd, &ev);
 	free(sessions->peers[p]);
 	if (p < sessions->peer_len)
-	for (int i = p; i < sessions->peer_len; i++)
+	for (int i = p; i < sessions->peer_len - 1; i++)
 		sessions->peers[i] = sessions->peers[i + 1];
 	sessions->peer_len--;
 
