@@ -18,6 +18,7 @@ typedef struct {
 	struct {
 		char *key;
 		char *chain;
+		char *ca;
 	} certs;
 	struct  sockaddr_in addr;
 	struct {

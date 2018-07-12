@@ -36,7 +36,7 @@ LOG_LEVEL    (?i:warn|warning|error|notice|debug|info|crit|critical|emerg|emerge
 LOG_FACILITY (?i:kern|user|mail|daemon|auth|syslog|lpr|news|uucp|clock|12|13|14|authpriv|ftp|cron|local[0-7])
 DECIMAL      ([0-9]+\.[0-9]+)
 INT          ([0-9]+)
-STRING       ([0-9A-Za-z_\/:\.]+)
+STRING       ([0-9A-Za-z_\/:\.\-]+)
 
 %%
 
@@ -52,6 +52,7 @@ STRING       ([0-9A-Za-z_\/:\.]+)
 	facility { return FACILITY; }
 	port     { return PORT;     }
 	cert     { return CERT;     }
+	ca       { return CA;       }
 	key      { return KEY;      }
 	log      { return LOG;      }
 }

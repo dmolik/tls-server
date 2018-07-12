@@ -28,6 +28,7 @@ main(int argc, char *argv[])
 
 	config->certs.chain = strdup("/path-to-tls-certs/cert.pem");
 	config->certs.key   = strdup("/path-to-tls-certs/key.pem");
+	config->certs.ca    = strdup("/path-to-tls-certs/ca.pem");
 
 
 	const char *PACKAGE = "server";

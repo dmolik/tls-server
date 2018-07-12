@@ -44,6 +44,7 @@ int  yyparse();
 %token PORT;
 %token KEY;
 %token CERT;
+%token CA;
 %token SESSIONS;
 
 %%
@@ -62,6 +63,7 @@ config:
 	| PORT     INT    { p_config->addr.sin_port = htons($2); }
 	| KEY      STRING { p_config->certs.key     = $2;        }
 	| CERT     STRING { p_config->certs.chain   = $2;        }
+	| CA       STRING { p_config->certs.ca      = $2;        }
 	;
 
 log_section:

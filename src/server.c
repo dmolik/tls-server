@@ -119,6 +119,17 @@ SSL_CTX *create_context()
 		":!LOW:!CAMELLIA"; // this should probably be configurable
 	SSL_CTX_set_cipher_list(ctx, PREFERRED_CIPHERS);
 
+	logger(LOG_DEBUG, "loading CA chain file");
+	if (SSL_CTX_load_verify_locations(ctx, config->certs.ca, NULL) <= 0) {
+		logger(LOG_ERR, "failed to load ca chain file(%s) [%s]",
+			config->certs.ca, ERR_error_string(ERR_get_error(), NULL));
+		exit(EXIT_FAILURE);
+	}
+	logger(LOG_DEBUG, "Setting client CA list");
+	SSL_CTX_set_client_CA_list(ctx, SSL_load_client_CA_file(config->certs.ca));
+
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER|SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+
 	logger(LOG_DEBUG, "loading cert chain file");
 	if (SSL_CTX_use_certificate_chain_file(ctx, config->certs.chain) <= 0) {
 		logger(LOG_ERR, "failed to load cert file(%s) [%s]",

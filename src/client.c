@@ -318,4 +318,6 @@ main(int argc, char *argv[])
 			return 1;
 		}
 	}
+	client();
+	return 0;
 }
