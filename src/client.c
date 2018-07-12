@@ -37,7 +37,7 @@ void init_ssl_opts(SSL_CTX* ctx) {
 		printf("Could not disable compression");
 		exit(2);
 	}
-	if (SSL_CTX_load_verify_locations(ctx, config->cert, 0) <= 0) {
+	if (SSL_CTX_load_verify_locations(ctx, config->ca, 0) <= 0) {
 		ERR_print_errors_fp(stderr);
 		exit(5);
 	}
@@ -165,7 +165,7 @@ int client (void)
 				exit(18);
 			} else {
 				printf("Error SSL_connect: %d", err);
-				perror("perror: ");
+				fprintf(stderr, "%s\n", ERR_error_string(ERR_get_error(), NULL));
 				SSL_free(ssl);
 				close(sd);
 				close(efd);
