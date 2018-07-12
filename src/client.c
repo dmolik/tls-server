@@ -14,41 +14,39 @@
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <stdbool.h>
+#include <getopt.h>
 
+#include "utils.h"
 
-#define CHK_NULL(x) if ((x)==NULL) exit (1)
-#define CHK_ERR(err,s) if ((err)==-1) { perror(s); exit(1); }
-#define CHK_SSL(err) if ((err)==-1) { ERR_print_errors_fp(stderr); exit(2); }
-
-#define CERTF "src/server.crt"
-#define KEYF  "src/server.key"
-
-#define MAXEVENTS 128
+typedef struct {
+	int   verbose;
+	int   port;
+	char *address;
+	char *ca;
+	char *cert;
+	char *key;
+} conf_t;
+conf_t *config;
 
 void init_ssl_opts(SSL_CTX* ctx) {
-	/* ---------------------------------------------------------------- */
-	/* Cipher AES128-GCM-SHA256 and AES256-GCM-SHA384 - good performance with AES-NI support. */
 	if (!SSL_CTX_set_cipher_list(ctx, "AES128-GCM-SHA256")) {
 		printf("Could not set cipher list");
 		exit(1);
 	}
-	/* ------------------------------- */
-	/* Configure certificates and keys */
 	if (!SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION)) {
 		printf("Could not disable compression");
 		exit(2);
 	}
-	if (SSL_CTX_load_verify_locations(ctx, CERTF, 0) <= 0) {
+	if (SSL_CTX_load_verify_locations(ctx, config->cert, 0) <= 0) {
 		ERR_print_errors_fp(stderr);
 		exit(5);
 	}
-	if (SSL_CTX_use_certificate_file(ctx, CERTF, SSL_FILETYPE_PEM) <= 0) {
+	if (SSL_CTX_use_certificate_file(ctx, config->cert, SSL_FILETYPE_PEM) <= 0) {
 		printf("Could not load cert file: ");
 		ERR_print_errors_fp(stderr);
 		exit(5);
 	}
-	if (SSL_CTX_use_PrivateKey_file(ctx, KEYF, SSL_FILETYPE_PEM) <= 0) {
+	if (SSL_CTX_use_PrivateKey_file(ctx, config->key, SSL_FILETYPE_PEM) <= 0) {
 		printf("Could not load key file");
 		ERR_print_errors_fp(stderr);
 		exit(6);
@@ -60,30 +58,16 @@ void init_ssl_opts(SSL_CTX* ctx) {
 	}
 	/* Enable client certificate verification. Enable before accepting connections. */
 	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT |
-	SSL_VERIFY_CLIENT_ONCE, 0);
+		SSL_VERIFY_CLIENT_ONCE, 0);
 }
 
 static void
-dump_cert_info(SSL *ssl, bool server) {
-
-	if (server) {
-		printf("Ssl server version: %s", SSL_get_version(ssl));
-	} else {
-		printf("Client Version: %s", SSL_get_version(ssl));
-	}
-
-	/* The cipher negotiated and being used */
+dump_cert_info(SSL *ssl)
+{
 	printf("Using cipher %s", SSL_get_cipher(ssl));
 
-	/* Get client's certificate (note: beware of dynamic allocation) - opt */
 	X509 *client_cert = SSL_get_peer_certificate(ssl);
 	if (client_cert != NULL) {
-		if(server) {
-		printf("Client certificate:\n");
-		}
-		else {
-			printf("Server certificate:\n");
-		}
 		char *str = X509_NAME_oneline(X509_get_subject_name(client_cert), 0, 0);
 		if(str == NULL) {
 			printf("warn X509 subject name is null");
@@ -105,7 +89,7 @@ dump_cert_info(SSL *ssl, bool server) {
 	}
 }
 
-int main(int argc, char *argv[])
+int client (void)
 {
 	const SSL_METHOD *meth = TLSv1_2_client_method();
 	SSL_CTX* ctx;
@@ -121,22 +105,20 @@ int main(int argc, char *argv[])
 	OpenSSL_add_ssl_algorithms();
 
 	ctx = SSL_CTX_new(meth);
-	CHK_NULL(ctx);
 
 	init_ssl_opts(ctx);
 	sd = socket(AF_INET, SOCK_STREAM, 0);
-	CHK_ERR(sd, "socket");
 
 	int flags = fcntl(sd, F_GETFL, 0);
 	if (flags < 0) {
 		exit(12);
 	}
-	fcntl(sd, F_SETFL, flags | O_NONBLOCK);
+	fcntl(sd, F_SETFL, flags|O_NONBLOCK);
 
-	memset(&sa, '\0', sizeof(sa));
+	memset(&sa, 0, sizeof(sa));
 	sa.sin_family      = AF_INET;
-	sa.sin_addr.s_addr = inet_addr("127.0.0.1"); /* Server IP */
-	sa.sin_port        = htons(1112); /* Server Port number */
+	sa.sin_addr.s_addr = inet_addr(config->address);
+	sa.sin_port        = htons(config->port);
 
 	printf("Connected to server %s, port %u\n", inet_ntoa(sa.sin_addr),
 			ntohs(sa.sin_port));
@@ -164,12 +146,11 @@ int main(int argc, char *argv[])
 	}
 
 	ssl = SSL_new(ctx);
-	CHK_NULL(ssl);
 
 	SSL_set_fd(ssl, sd);
 	SSL_set_connect_state(ssl);
 
-	for(;;) {
+	for (;;) {
 		int success = SSL_connect(ssl);
 
 		if (success < 0) {
@@ -191,15 +172,15 @@ int main(int argc, char *argv[])
 				exit(16);
 			}
 		} else {
-			dump_cert_info(ssl, false);
+			dump_cert_info(ssl);
 			break;
 		}
 	}
 
-	struct epoll_event* events = calloc(MAXEVENTS, sizeof event);
+	struct epoll_event* events = calloc(SOMAXCONN, sizeof event);
 
 	for (;;) {
-		int n = epoll_wait(efd, events, MAXEVENTS, -1);
+		int n = epoll_wait(efd, events, SOMAXCONN, -1);
 		if (n < 0 && n == EINTR) {
 			printf("epoll_wait System call interrupted. Continue..");
 			continue;
@@ -216,7 +197,6 @@ int main(int argc, char *argv[])
 				continue;
 			} else if (events->events & (EPOLLIN | EPOLLHUP)) {
 				err = SSL_read(ssl, buf, sizeof(buf) - 1);
-				CHK_SSL(err);
 				buf[err] = '\0';
 				printf("Client Received %d chars - '%s'\n", err, buf);
 
@@ -237,7 +217,6 @@ int main(int argc, char *argv[])
 				exit(0);
 			} else if (events->events & EPOLLOUT) {
 				err = SSL_write(ssl, "PING", strlen("PING"));
-				CHK_SSL(err);
 
 				if (err <= 0) {
 					if (err == SSL_ERROR_WANT_READ ||
@@ -260,4 +239,83 @@ int main(int argc, char *argv[])
 	close(sd);
 	close(efd);
 	return 0;
+}
+
+int
+main(int argc, char *argv[])
+{
+	config = malloc(sizeof(conf_t));
+	config->port    =  3003;
+	config->address = strdup("127.0.0.1");
+	config->cert    = strdup("client.cert.pem");
+	config->key     = strdup("client.key.pem");
+	config->key     = strdup("ca.chain.pem");
+	config->verbose = 0;
+	struct option long_opts[] = {
+		{ "help",             no_argument, NULL, 'h' },
+		{ "verbose",          no_argument, NULL, 'v' },
+		{ "addreses",   required_argument, NULL, 'a' },
+		{ "port",       required_argument, NULL, 'p' },
+		{ "ca",         required_argument, NULL, 'C' },
+		{ "cert",       required_argument, NULL, 'c' },
+		{ "key",        required_argument, NULL, 'k' },
+		{ 0, 0, 0, 0 },
+	};
+	for (;;) {
+		int idx = 1;
+		int c = getopt_long(argc, argv, "h?v+a:p:C:c:k:", long_opts, &idx);
+		if (c == -1) break;
+
+		switch (c) {
+		case 'h':
+		case '?':
+			printf("%s v%s\n", "tls-client", "0.0.1");
+			printf("Usage: %s [-h?Fv]\n"
+			       "          \n\n",
+			        "tls-client");
+
+			printf("Options:\n");
+			printf("  -?, -h, --help    show this help screen\n");
+			printf("  -v, --verbose     increase debugging\n");
+
+			printf("  -a, --address     the address to connect to\n");
+			printf("                    default: 127.0.0.1\n");
+			printf("  -p, --port        the port to connect to\n");
+			printf("                    default: 3003\n");
+
+			printf("  -C, --ca          the ca chain file to use\n");
+			printf("                    default: ./ca.chain.pem\n");
+			printf("  -c, --cert        the client cert file to load\n");
+			printf("                    default: ./client.cert.pem\n");
+			printf("  -k, --key         the the client key file to use\n");
+			printf("                    default: ./client.key.pem\n");
+
+			printf("See also: \n  %s\n", "https://github.com/dmolik/tls-server"); // PACKAGE_URL);
+
+			exit(EXIT_SUCCESS);
+
+		case 'v':
+			config->verbose++;
+			break;
+		case 'p':
+			config->port    = atoi(optarg);
+			break;
+		case 'a':
+			config->address = strdup(optarg);
+			break;
+		case 'C':
+			config->ca      = strdup(optarg);
+			break;
+		case 'c':
+			config->cert    = strdup(optarg);
+			break;
+		case 'k':
+			config->key     = strdup(optarg);
+			break;
+		default:
+			free(config);
+			fprintf(stderr, "unhandled option flag %#02x\n", c);
+			return 1;
+		}
+	}
 }
