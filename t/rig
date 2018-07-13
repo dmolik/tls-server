@@ -1,0 +1,32 @@
+#!/bin/bash
+
+echo "Creating certs"
+./gen_cert server $(hostname -f)
+./gen_cert user   client.$(hostname -f)
+
+
+mkdir t/data
+
+cat intermediate_cert.pem ca_cert.pem > t/data/ca.chain.pem
+cat $(hostname -f).cert.pem t/data/ca.chain.pem > t/data/server.cert.pem
+cat $(hostname -f).key.pem > t/data/server.key.pem
+
+cat client.$(hostname -f).cert.pem > t/data/client.cert.pem
+cat client.$(hostname -f).key.pem  > t/data/client.key.pem
+rm *.pem
+
+cat <<EOF > t/data/server.conf
+pidfile ${PWD}/t/data/server.pid
+user  ${USER}
+group ${USER}
+sessions 1024
+workers 4
+port 3003
+key  ${PWD}/t/data/server.key.pem
+cert ${PWD}/t/data/server.cert.pem
+ca   ${PWD}/t/data/ca.chain.pem
+log {
+	type  console
+	level debug
+}
+EOF

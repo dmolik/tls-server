@@ -6,3 +6,4 @@
 src/scanner.c
 src/parse.c
 src/parse.h
+t/data/
