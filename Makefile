@@ -6,43 +6,37 @@ LDFLAGS := -Wl,--as-needed -Wl,--hash-style=gnu
 CFLAGS  += -O3 -march=native -mtune=native -flto=8
 endif
 
-SERVER = server
-CLIENT = client
-GEN    = gen_cert
-
 OBJS += src/daemon.o src/log.o src/utils.o
 
-SERVER_OBJS = $(OBJS) src/parse.o src/scanner.o src/main.o
-CLIENT_OBJS = $(OBJS)
-GEN_OBJS    =
+BINS  = server client gen_cert
 
-all: $(SERVER) $(CLIENT) $(GEN)
+server_OBJS   := src/server.o $(OBJS) src/parse.o src/scanner.o src/main.o
+client_OBJS   := src/client.o $(OBJS)
+gen_cert_OBJS := src/gen_cert.o
 
-$(SERVER): src/$(SERVER).o $(SERVER_OBJS)
-	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
+all: $(BINS)
+
+define PROGRAM_template =
+ $(1): $$($(1)_OBJS) $$($(1)_LIBS:%=-l%)
+ ALL_OBJS   += $$($(1)_OBJS)
+endef
+
+$(foreach prog,$(BINS),$(eval $(call PROGRAM_template,$(prog))))
+
+$(BINS):
+	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ ${$@_OBJS}
 ifeq ($(PERF), 1)
-	strip $(BIN)
-endif
-$(CLIENT): src/$(CLIENT).o $(CLIENT_OBJS)
-	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
-ifeq ($(PERF), 1)
-	strip $(BIN)
-endif
-$(GEN): src/$(GEN).o $(GEN_OBJS)
-	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
-ifeq ($(PERF), 1)
-	strip $(BIN)
+	strip $@
 endif
 
 src/scanner.c: src/scanner.l src/parse.c
 	$(LEX) --header-file --yylineno --outfile=$@ $<
 src/parse.c: src/parse.y
 	$(YACC) -d --output-file=src/parse.c $<
-src/%.o: src/%.c $(DEPS)
+src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
-
 scan: clean
 	scan-build -v make all
 
 clean:
-	rm -f src/*.o src/scanner.c src/parse.c src/parse.h $(SERVER) $(CLIENT) $(GEN)
+	rm -f src/*.o src/scanner.c src/parse.c src/parse.h ${BINS}
