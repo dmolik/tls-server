@@ -2,6 +2,7 @@
 *.o
 /server
 /client
+/gen_cert
 src/scanner.c
 src/parse.c
 src/parse.h

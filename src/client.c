@@ -17,6 +17,7 @@
 #include <getopt.h>
 
 #include "utils.h"
+#include "log.h"
 
 typedef struct {
 	int   verbose;

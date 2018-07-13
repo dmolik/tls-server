@@ -8,21 +8,27 @@ endif
 
 SERVER = server
 CLIENT = client
+GEN    = gen_cert
 
 OBJS += src/daemon.o src/log.o src/utils.o
 
 SERVER_OBJS = $(OBJS) src/parse.o src/scanner.o src/main.o
 CLIENT_OBJS = $(OBJS)
+GEN_OBJS    =
 
-all: $(SERVER) $(CLIENT)
+all: $(SERVER) $(CLIENT) $(GEN)
 
 $(SERVER): src/$(SERVER).o $(SERVER_OBJS)
 	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
 ifeq ($(PERF), 1)
 	strip $(BIN)
 endif
-
 $(CLIENT): src/$(CLIENT).o $(CLIENT_OBJS)
+	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
+ifeq ($(PERF), 1)
+	strip $(BIN)
+endif
+$(GEN): src/$(GEN).o $(GEN_OBJS)
 	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ $^
 ifeq ($(PERF), 1)
 	strip $(BIN)
@@ -39,4 +45,4 @@ scan: clean
 	scan-build -v make all
 
 clean:
-	rm -f src/*.o src/scanner.c src/parse.c src/parse.h $(SERVER) $(CLIENT)
+	rm -f src/*.o src/scanner.c src/parse.c src/parse.h $(SERVER) $(CLIENT) $(GEN)
