@@ -1,0 +1,27 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+-x "./client" or die "Can't find ./client; do you need to run `make'?\n";
+-x "./server" or die "Can't find ./server; do you need to run `make'?\n";
+
+my $server_pid = fork;
+die "fork failed: $!\n" unless defined $server_pid;
+if ($server_pid == 0) {
+	exec qw(valgrind -v --leak-check=full -- ./server -Fvvv -c t/data/server.conf);
+	die "exec of server failed: $!\n";
+}
+
+my $client_pid = fork;
+die "fork failed: $!\n" unless defined $client_pid;
+if ($client_pid == 0) {
+	exec qw(./client -vvv --port 3003 --ca t/data/ca.chain.pem --cert t/data/client.cert.pem --key t/data/client.key.pem);
+	die "exec of client failed: $!\n";
+}
+
+sleep($ARGV[0] || 60);
+kill INT => $server_pid;
+sleep(1);
+kill KILL => $client_pid;
+kill KILL => $server_pid;

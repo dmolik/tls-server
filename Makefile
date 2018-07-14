@@ -39,4 +39,5 @@ scan: clean
 	scan-build -v make all
 
 clean:
-	rm -f src/*.o src/scanner.c src/parse.c src/parse.h ${BINS}
+	rm -f  src/*.o src/scanner.c src/parse.c src/parse.h ${BINS}
+	rm -rf t/data

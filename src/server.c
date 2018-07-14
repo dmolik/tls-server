@@ -243,12 +243,13 @@ server(void *data)
 		logger(LOG_ERR, "[%d[ failed to allocate thread configuration (mem)", id);
 		exit(EXIT_FAILURE);
 	}
+	memset(server, 0, sizeof(server_t));
 	sessions_t *sessions;
 	if ((sessions = malloc(sizeof(sessions_t))) == NULL) {
 		logger(LOG_ERR, "[%d[ failed to allocate session configuration (mem)", id);
 		exit(EXIT_FAILURE);
 	}
-	sessions->peer_len = 0;
+	memset(sessions, 0, sizeof(sessions_t));
 	if ((sessions->peers = malloc(sizeof(peer_t*) * config->sessions)) == NULL) {
 		logger(LOG_ERR, "[%d[ failed to allocate session storage (mem)", id);
 		exit(EXIT_FAILURE);
@@ -264,6 +265,7 @@ server(void *data)
 	logger(LOG_DEBUG, "[%d] constructing event loop", id);
 	struct epoll_event ev, events[SOMAXCONN];
 	int nfds, n, p, peer_fd;
+	memset(&ev, 0, sizeof(struct epoll_event));
 
 	if ((server->epollfd = epoll_create1(0)) == -1) {
 		logger(LOG_ERR, "failed to create fd loop (%i) %s", errno, strerror(errno));
@@ -276,6 +278,7 @@ server(void *data)
 		exit(EXIT_FAILURE);
 	}
 
+	ev.events  = EPOLLIN|EPOLLET;
 	ev.data.fd = intercom->pairs[id]->fd[1];
 	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, intercom->pairs[id]->fd[1], &ev) == -1) {
 		logger(LOG_ERR, "failed to add listening socket to fd loop (%i) %s", errno, strerror(errno));
@@ -379,11 +382,12 @@ int serve(config_t *conf)
 		logger(LOG_ERR, "failed to allocate global intercom (mem)");
 		exit(EXIT_FAILURE);
 	}
-	intercom->len   = 0;
+	memset(intercom, 0, sizeof(comm_t));
 	if ((intercom->pairs = malloc(sizeof(pair_t*) * config->workers)) == NULL) {
 		logger(LOG_ERR, "failed to allocate intercom pairs (mem)");
 		exit(EXIT_FAILURE);
 	}
+	memset(intercom->pairs, 0, sizeof(pair_t*) * config->workers);
 	if ((epollfd = epoll_create1(0)) == -1) {
 		logger(LOG_ERR, "failed to create fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
@@ -395,6 +399,7 @@ int serve(config_t *conf)
 			logger(LOG_ERR, "failed to allocate intercom pair (mem)");
 			exit(EXIT_FAILURE);
 		}
+		memset(intercom->pairs[intercom->len], 0, sizeof(pair_t));
 		if (socketpair(AF_UNIX, SOCK_STREAM, 0, intercom->pairs[intercom->len]->fd) != 0) {
 			logger(LOG_ERR, "failed opening stream socket pair (%i) %s", errno, strerror(errno));
 			exit(EXIT_FAILURE);
@@ -411,6 +416,7 @@ int serve(config_t *conf)
 			exit(EXIT_FAILURE);
 		}
 
+		memset(&ev, 0, sizeof(struct epoll_event));
 		ev.events  = EPOLLIN|EPOLLET;
 		ev.data.fd = intercom->pairs[intercom->len]->fd[0];
 		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, intercom->pairs[intercom->len]->fd[0], &ev) == -1) {
