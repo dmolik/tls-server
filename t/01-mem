@@ -20,7 +20,7 @@ if ($client_pid == 0) {
 	die "exec of client failed: $!\n";
 }
 
-sleep($ARGV[0] || 60);
+sleep($ARGV[0] || 20);
 kill INT => $server_pid;
 sleep(1);
 kill KILL => $client_pid;

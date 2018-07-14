@@ -1,6 +1,5 @@
 #!/bin/bash
 
-echo "Creating certs"
 ./gen_cert server $(hostname -f)
 ./gen_cert user   client.$(hostname -f)
 

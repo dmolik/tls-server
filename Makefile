@@ -38,6 +38,18 @@ src/%.o: src/%.c
 scan: clean
 	scan-build -v make all
 
+TESTS :=
+TESTS += 01-mem
+
+testdata: $(BINS) t/data/server.conf
+
+t/data/server.conf:
+	$(shell t/rig)
+
+test: check
+check: testdata
+	prove -v $(addprefix ./t/,$(TESTS))
+
 clean:
 	rm -f  src/*.o src/scanner.c src/parse.c src/parse.h ${BINS}
 	rm -rf t/data
