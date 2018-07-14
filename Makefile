@@ -16,12 +16,12 @@ gen_cert_OBJS := src/gen_cert.o
 
 all: $(BINS)
 
-define PROGRAM_template =
+define BIN_template =
  $(1): $$($(1)_OBJS) $$($(1)_LIBS:%=-l%)
  ALL_OBJS   += $$($(1)_OBJS)
 endef
 
-$(foreach prog,$(BINS),$(eval $(call PROGRAM_template,$(prog))))
+$(foreach bin,$(BINS),$(eval $(call BIN_template,$(bin))))
 
 $(BINS):
 	$(CC) $(CFLAGS) $(LIBS) $(LDFLAGS) -o $@ ${$@_OBJS}
