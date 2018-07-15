@@ -149,7 +149,7 @@ SSL_CTX *create_context()
 
 int
 add_client(server_t *server, sessions_t *sessions, struct sockaddr_in peer_addr, int peer_fd) {
-	if ((sessions->peers[sessions->peer_len] = malloc(sizeof(peer_t))) == NULL) {
+	if ((sessions->peers[sessions->peer_len] = (peer_t *) malloc(sizeof(peer_t))) == NULL) {
 		logger(LOG_ERR, "failed to add session (mem)");
 		exit(EXIT_FAILURE);
 	}
@@ -238,6 +238,7 @@ static void *
 server(void *data)
 {
 	int id = *((int *)data);
+	logger(LOG_DEBUG, "initializing thread %d", id);
 	server_t *server;
 	if ((server = malloc(sizeof(server_t))) == NULL) {
 		logger(LOG_ERR, "[%d[ failed to allocate thread configuration (mem)", id);
@@ -250,7 +251,7 @@ server(void *data)
 		exit(EXIT_FAILURE);
 	}
 	memset(sessions, 0, sizeof(sessions_t));
-	if ((sessions->peers = malloc(sizeof(peer_t*) * config->sessions)) == NULL) {
+	if ((sessions->peers = (peer_t **) malloc(sizeof(peer_t*) * config->sessions)) == NULL) {
 		logger(LOG_ERR, "[%d[ failed to allocate session storage (mem)", id);
 		exit(EXIT_FAILURE);
 	}
@@ -305,6 +306,7 @@ server(void *data)
 					add_client(server, sessions, peer_addr, peer_fd);
 					logger(LOG_INFO, "[%d] now has %d sessions\n", id, sessions->peer_len);
 				} else if (events[n].data.fd == intercom->pairs[id]->fd[1]) {
+					logger(LOG_DEBUG, "[%d] incomming intercom message", id);
 					char buf[1024];
 					int len;
 					if ((len = read(intercom->pairs[id]->fd[1], buf, 1024)) <= 0) {
@@ -312,6 +314,7 @@ server(void *data)
 							logger(LOG_WARNING, "[%d] intercom broadcast is crumulent (%i) [%s]", errno, strerror(errno));
 						continue;
 					}
+					logger(LOG_DEBUG, "[%d] checking intercom message", id);
 					if (strncmp("bcast", buf, 5) == 0) {
 						send_msg_all(sessions, buf + 5, 1024 - 5);
 					}
@@ -331,9 +334,15 @@ server(void *data)
 								char imsg[1024] = "bcast";
 								strncat(imsg, msg, 1024 - 6);
 								for (int c = 0; c < config->workers; c++) {
-									if (c != id)
-										send(intercom->pairs[c]->fd[0], imsg, 1024, 0);
+									if (c != id) {
+										logger(LOG_DEBUG, "sending to %d worker", c);
+										if (send(intercom->pairs[c]->fd[0], imsg, 1024, 0) < 0) {
+											logger(LOG_ERR, "failed to send to worker %d (%i) %s", c, errno, strerror(errno));
+
+										}
+									}
 								}
+								// send(intercom->pairs[id]->fd[1], imsg, 1024, 0);
 								send_msg_all(sessions,msg,1024);
 								memset(imsg, 0, 1024);
 
@@ -376,14 +385,14 @@ int serve(config_t *conf)
 	init_openssl();
 	config = conf;
 	struct epoll_event ev, events[SOMAXCONN];
-	int nfds, n, epollfd, fl;
+	int nfds, n, epollfd, fl, id;
 
 	if ((intercom = malloc(sizeof(comm_t))) == NULL) {
 		logger(LOG_ERR, "failed to allocate global intercom (mem)");
 		exit(EXIT_FAILURE);
 	}
 	memset(intercom, 0, sizeof(comm_t));
-	if ((intercom->pairs = malloc(sizeof(pair_t*) * config->workers)) == NULL) {
+	if ((intercom->pairs = (pair_t **) malloc(sizeof(pair_t*) * config->workers)) == NULL) {
 		logger(LOG_ERR, "failed to allocate intercom pairs (mem)");
 		exit(EXIT_FAILURE);
 	}
@@ -392,10 +401,11 @@ int serve(config_t *conf)
 		logger(LOG_ERR, "failed to create fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-	logger(LOG_DEBUG, "spooling %d workers", config->workers);
+	logger(LOG_DEBUG, "spooling intercom with %d comms", config->workers);
 	pthread_t threads[config->workers];
+	id = 0;
 	for (int i = 0; i < config->workers; i++) {
-		if ((intercom->pairs[intercom->len] = malloc(sizeof(pair_t))) == NULL) {
+		if ((intercom->pairs[intercom->len] = (pair_t *) malloc(sizeof(pair_t))) == NULL) {
 			logger(LOG_ERR, "failed to allocate intercom pair (mem)");
 			exit(EXIT_FAILURE);
 		}
@@ -423,16 +433,36 @@ int serve(config_t *conf)
 			logger(LOG_ERR, "failed to add listening socket to fd loop (%i) %s", errno, strerror(errno));
 			exit(EXIT_FAILURE);
 		}
-		int d = i;
-		pthread_create(threads + i, NULL, &server, (void *)&d);
+		pthread_create(threads + i, NULL, &server, (void *)&id);
+		id = i;
 		intercom->len++;
 	}
+	logger(LOG_DEBUG, "initialized %d threads", id + 1);
 	logger(LOG_DEBUG, "main thread initialized");
 	for (;;) {
 		if ((nfds = epoll_wait(epollfd, events, SOMAXCONN, -1)) == -1) {
 			for (n = 0; n < nfds; ++n) {
 				if (events[n].events & EPOLLIN) {
-
+					for (int i = 0; i < intercom->len; i++) {
+						if (events[n].data.fd == intercom->pairs[i]->fd[0]) {
+							logger(LOG_DEBUG, "[%d] checking intercom message", i);
+							int len = 0;
+							char buf[1024];
+							memset(buf, 0, 1024);
+							if ((len = read(intercom->pairs[i]->fd[0], buf, 1024)) <= 0) {
+								if (errno != EAGAIN)
+									logger(LOG_WARNING, "[%d] intercom broadcast is crumulent (%i) [%s]", errno, strerror(errno));
+								continue;
+							}
+							if (strncmp("bcast", buf, 5) == 0) {
+								for (int c = 0; c < intercom->len; c++) {
+									logger(LOG_DEBUG, "master sending to %d worker", c);
+									if (c != i)
+										send(intercom->pairs[c]->fd[0], buf, 1024, 0);
+								}
+							}
+						}
+					}
 				}
 			}
 		}
