@@ -31,35 +31,37 @@ conf_t *config;
 
 void init_ssl_opts(SSL_CTX* ctx) {
 	if (!SSL_CTX_set_cipher_list(ctx, "AES128-GCM-SHA256")) {
-		printf("Could not set cipher list");
-		exit(1);
+		logger(LOG_ERR, "Could not set cipher list [%s]",
+			ERR_error_string(ERR_get_error(), NULL));
+		exit(EXIT_FAILURE);
 	}
 	if (!SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION)) {
-		printf("Could not disable compression");
-		exit(2);
+		logger(LOG_ERR, "Could not disable compression [%s]",
+			ERR_error_string(ERR_get_error(), NULL));
+		exit(EXIT_FAILURE);
 	}
 	if (SSL_CTX_load_verify_locations(ctx, config->ca, 0) <= 0) {
-		ERR_print_errors_fp(stderr);
-		exit(5);
+		logger(LOG_ERR, "Unable to set verify locations [%s]",
+			ERR_error_string(ERR_get_error(), NULL));
+		exit(EXIT_FAILURE);
 	}
 	if (SSL_CTX_use_certificate_file(ctx, config->cert, SSL_FILETYPE_PEM) <= 0) {
-		printf("Could not load cert file: ");
-		ERR_print_errors_fp(stderr);
-		exit(5);
+		logger(LOG_ERR, "Could not load cert file(%s) [%s]",
+			config->cert, ERR_error_string(ERR_get_error(), NULL));
+		exit(EXIT_FAILURE);
 	}
 	if (SSL_CTX_use_PrivateKey_file(ctx, config->key, SSL_FILETYPE_PEM) <= 0) {
-		printf("Could not load key file");
-		ERR_print_errors_fp(stderr);
-		exit(6);
+		logger(LOG_ERR, "Could not load key file(%s) [%s]",
+			config->key, ERR_error_string(ERR_get_error(), NULL));
+		exit(EXIT_FAILURE);
 	}
 	if (!SSL_CTX_check_private_key(ctx)) {
-		fprintf(stderr,
-				"Private key does not match public key in certificate.\n");
-		exit(7);
+		logger(LOG_ERR, "Private key does not match public key in certificate [%s]",
+			ERR_error_string(ERR_get_error(), NULL));
+		exit(EXIT_FAILURE);
 	}
-	/* Enable client certificate verification. Enable before accepting connections. */
-	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT |
-		SSL_VERIFY_CLIENT_ONCE, 0);
+
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER|SSL_VERIFY_FAIL_IF_NO_PEER_CERT|SSL_VERIFY_CLIENT_ONCE, 0);
 }
 
 static void
@@ -70,24 +72,23 @@ dump_cert_info(SSL *ssl)
 	X509 *client_cert = SSL_get_peer_certificate(ssl);
 	if (client_cert != NULL) {
 		char *str = X509_NAME_oneline(X509_get_subject_name(client_cert), 0, 0);
-		if(str == NULL) {
-			printf("warn X509 subject name is null");
+		if (str == NULL) {
+			logger(LOG_WARNING, "X509 subject name is null");
 		}
 		printf("\t Subject: %s\n", str);
 		OPENSSL_free(str);
 
 		str = X509_NAME_oneline(X509_get_issuer_name(client_cert), 0, 0);
-		if(str == NULL) {
-			printf("warn X509 issuer name is null");
+		if (str == NULL) {
+			logger(LOG_WARNING, "X509 issuer name is null");
 		}
 		printf("\t Issuer: %s\n", str);
 		OPENSSL_free(str);
 
 		/* Deallocate certificate, free memory */
 		X509_free(client_cert);
-	} else {
-		printf("Client does not have certificate.\n");
-	}
+	} else
+		logger(LOG_ERR, "Client does not have certificate");
 }
 
 int client (void)
@@ -136,14 +137,23 @@ int client (void)
 		exit(1);
 	}
 
-	struct epoll_event event;
-	event.data.fd = sd;
-	event.events = EPOLLIN | EPOLLOUT | EPOLLET |EPOLLERR | EPOLLHUP;
+	struct epoll_event ev;
+	ev.data.fd = sd;
+	ev.events  = EPOLLIN|EPOLLOUT|EPOLLET|EPOLLERR|EPOLLHUP;
 
-	int s = epoll_ctl(efd, EPOLL_CTL_ADD, sd, &event);
+	int s = epoll_ctl(efd, EPOLL_CTL_ADD, sd, &ev);
 	if (s == -1) {
 		perror("epoll_ctl");
 		exit(2);
+	}
+
+	int fl = fcntl(STDIN_FILENO, F_GETFL);
+	fcntl(STDIN_FILENO, F_SETFL, fl|O_NONBLOCK);
+	ev.data.fd = STDIN_FILENO;
+	ev.events  = EPOLLIN|EPOLLET;
+	if (epoll_ctl(efd, EPOLL_CTL_ADD, STDIN_FILENO, &ev) == -1) {
+		logger(LOG_ERR, "failed to add stdin to epoll [%d] [%s]", errno, strerror(errno));
+		exit(EXIT_FAILURE);
 	}
 
 	ssl = SSL_new(ctx);
@@ -157,11 +167,10 @@ int client (void)
 		if (success < 0) {
 			err = SSL_get_error(ssl, success);
 
-			if (err == SSL_ERROR_WANT_READ ||
-					err == SSL_ERROR_WANT_WRITE ||
-					err == SSL_ERROR_WANT_X509_LOOKUP) {
+			if (err == SSL_ERROR_WANT_READ||err == SSL_ERROR_WANT_WRITE
+					||err == SSL_ERROR_WANT_X509_LOOKUP) {
 				continue;
-			} else if(err == SSL_ERROR_ZERO_RETURN) {
+			} else if (err == SSL_ERROR_ZERO_RETURN) {
 				printf("SSL_connect: close notify received from peer");
 				exit(18);
 			} else {
@@ -178,7 +187,7 @@ int client (void)
 		}
 	}
 
-	struct epoll_event* events = calloc(SOMAXCONN, sizeof event);
+	struct epoll_event* events = calloc(SOMAXCONN, sizeof ev);
 
 	for (;;) {
 		int n = epoll_wait(efd, events, SOMAXCONN, -1);
@@ -187,52 +196,71 @@ int client (void)
 			continue;
 		}
 
-		int i;
+		int i, index;
+		char data[4096], buf2[64];
 		for (i = 0; i < n; i++) {
-			if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)
-					|| (!(events[i].events & (EPOLLIN | EPOLLOUT)))) {
-				/* An error has occurred on this socket or the socket is not
-				 ready for reading (why were we notified then?) */
-				fprintf(stderr, "epoll error\n");
-				close(events[i].data.fd);
-				continue;
-			} else if (events->events & (EPOLLIN | EPOLLHUP)) {
-				err = SSL_read(ssl, buf, sizeof(buf) - 1);
-				buf[err] = '\0';
-				printf("Client Received %d chars - '%s'\n", err, buf);
+			if (events[i].data.fd ==  sd) {
+				if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)
+						|| (!(events[i].events & (EPOLLIN | EPOLLOUT)))) {
+					/* An error has occurred on this socket or the socket is not
+					 ready for reading (why were we notified then?) */
+					fprintf(stderr, "epoll error\n");
+					close(events[i].data.fd);
+					continue;
+				} else if (events[i].events & (EPOLLIN | EPOLLHUP)) {
+					err = SSL_read(ssl, buf, sizeof(buf) - 1);
+					buf[err] = '\0';
+					printf("Client Received %d chars - '%s'\n", err, buf);
 
-				if (err <= 0) {
-					if (err == SSL_ERROR_WANT_READ ||
-						err == SSL_ERROR_WANT_WRITE ||
-						err == SSL_ERROR_WANT_X509_LOOKUP) {
-						printf("Read could not complete. Will be invoked later.");
-						break;
-					} else if(err == SSL_ERROR_ZERO_RETURN) {
-						printf("SSL_read: close notify received from peer");
-						return 0;
-					} else {
-						printf("Error during SSL_read");
-						exit(17);
+					if (err <= 0) {
+						if (err == SSL_ERROR_WANT_READ ||
+							err == SSL_ERROR_WANT_WRITE ||
+							err == SSL_ERROR_WANT_X509_LOOKUP) {
+							printf("Read could not complete. Will be invoked later.");
+							break;
+						} else if(err == SSL_ERROR_ZERO_RETURN) {
+							printf("SSL_read: close notify received from peer");
+							return 0;
+						} else {
+							printf("Error during SSL_read");
+							exit(17);
+						}
+					}
+					// exit(0);
+				} else if (events[i].events & EPOLLOUT) {
+					err = SSL_write(ssl, "PING", strlen("PING"));
+
+					if (err <= 0) {
+						if (err == SSL_ERROR_WANT_READ ||
+							err == SSL_ERROR_WANT_WRITE ||
+							err == SSL_ERROR_WANT_X509_LOOKUP) {
+							printf("Write could not complete. Will be invoked later.");
+							break;
+						} else if(err == SSL_ERROR_ZERO_RETURN) {
+							printf("SSL_write: close notify received from peer");
+							return 0;
+						} else {
+							printf("Error during SSL_write");
+							exit(17);
+						}
 					}
 				}
-				exit(0);
-			} else if (events->events & EPOLLOUT) {
-				err = SSL_write(ssl, "PING", strlen("PING"));
-
-				if (err <= 0) {
-					if (err == SSL_ERROR_WANT_READ ||
-						err == SSL_ERROR_WANT_WRITE ||
-						err == SSL_ERROR_WANT_X509_LOOKUP) {
-						printf("Write could not complete. Will be invoked later.");
+			} else if (events[i].data.fd == STDIN_FILENO) {
+				index = 0;
+				int len;
+				while ((len = read(STDIN_FILENO, buf2, 64)) > 0) {
+					memcpy(data + index, buf2, len);
+					memset(buf2, 0, 64);
+					index += len;
+					if (len < 64)
 						break;
-					} else if(err == SSL_ERROR_ZERO_RETURN) {
-						printf("SSL_write: close notify received from peer");
-						return 0;
-					} else {
-						printf("Error during SSL_write");
-						exit(17);
-					}
 				}
+				if (index == 0)
+					index++;
+				data[index - 1] = '\0';
+				printf("input: %s", data);
+				err = SSL_write(ssl, data, index * 64);
+				memset(data, 0, 4096);
 			}
 		}
 	}
@@ -319,6 +347,9 @@ main(int argc, char *argv[])
 			return 1;
 		}
 	}
+	log_open("tls-client", "console");
+	log_level(LOG_ERR + config->verbose, NULL);
+
 	client();
 	return 0;
 }
