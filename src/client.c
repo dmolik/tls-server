@@ -64,43 +64,14 @@ void init_ssl_opts(SSL_CTX* ctx) {
 	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER|SSL_VERIFY_FAIL_IF_NO_PEER_CERT|SSL_VERIFY_CLIENT_ONCE, 0);
 }
 
-static void
-dump_cert_info(SSL *ssl)
-{
-	printf("Using cipher %s", SSL_get_cipher(ssl));
-
-	X509 *client_cert = SSL_get_peer_certificate(ssl);
-	if (client_cert != NULL) {
-		char *str = X509_NAME_oneline(X509_get_subject_name(client_cert), 0, 0);
-		if (str == NULL) {
-			logger(LOG_WARNING, "X509 subject name is null");
-		}
-		printf("\t Subject: %s\n", str);
-		OPENSSL_free(str);
-
-		str = X509_NAME_oneline(X509_get_issuer_name(client_cert), 0, 0);
-		if (str == NULL) {
-			logger(LOG_WARNING, "X509 issuer name is null");
-		}
-		printf("\t Issuer: %s\n", str);
-		OPENSSL_free(str);
-
-		/* Deallocate certificate, free memory */
-		X509_free(client_cert);
-	} else
-		logger(LOG_ERR, "Client does not have certificate");
-}
-
 int client (void)
 {
 	const SSL_METHOD *meth = TLSv1_2_client_method();
 	SSL_CTX* ctx;
 	SSL* ssl;
-	//X509* server_cert;
 	int err;
 	int sd;
 	struct sockaddr_in sa;
-	//char* str;
 	char buf[4096];
 
 	SSL_load_error_strings();
@@ -181,10 +152,8 @@ int client (void)
 				close(efd);
 				exit(16);
 			}
-		} else {
-			dump_cert_info(ssl);
+		} else
 			break;
-		}
 	}
 
 	struct epoll_event* events = calloc(SOMAXCONN, sizeof ev);
@@ -210,7 +179,7 @@ int client (void)
 				} else if (events[i].events & (EPOLLIN | EPOLLHUP)) {
 					err = SSL_read(ssl, buf, sizeof(buf) - 1);
 					buf[err] = '\0';
-					printf("Client Received %d chars - '%s'\n", err, buf);
+					printf("> %s\n", buf);
 
 					if (err <= 0) {
 						if (err == SSL_ERROR_WANT_READ ||
@@ -258,7 +227,6 @@ int client (void)
 				if (index == 0)
 					index++;
 				data[index - 1] = '\0';
-				printf("input: %s", data);
 				err = SSL_write(ssl, data, index * 64);
 				memset(data, 0, 4096);
 			}
