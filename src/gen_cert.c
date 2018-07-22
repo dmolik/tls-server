@@ -26,14 +26,17 @@
 #define REQ_DN_IN  (REQ_DN_O " Intermediate CA")
 #define NS_COMMENT (REQ_DN_O " Certificate")
 
-enum TYPE{TYPE_ca, TYPE_intermediate, TYPE_server, TYPE_client};
+int TYPE_ca           = 0x0001;
+int TYPE_intermediate = 0x0010;
+int TYPE_server       = 0x0100;
+int TYPE_client       = 0x1000;
 
 static void seed_entropy(void);
 static void cleanup_crypto(void);
 static void initialize_crypto(void);
 static int generate_key_csr(EVP_PKEY **key, X509_REQ **req, char *CN);
 static int generate_set_random_serial(X509 *crt);
-static int generate_pair(EVP_PKEY *ca_key, X509 *ca_crt, EVP_PKEY **key, X509 **crt, enum TYPE CERT_TYPE, char *CN);
+static int generate_pair(EVP_PKEY *ca_key, X509 *ca_crt, EVP_PKEY **key, X509 **crt, int CERT_TYPE, char *CN);
 static int load_pair(const char *key_path, EVP_PKEY **key, const char *crt_path, X509 **crt);
 static int save_pair(const char *key_path, EVP_PKEY **key, const char *crt_path, X509 **crt);
 static int add_ext(X509V3_CTX *ctx, X509 *crt, int nid, char *value);
@@ -87,6 +90,12 @@ int main(int argc, char *argv[])
 		} else if (strncmp("server", argv[1], 6) == 0) {
 			CN = strdup(argv[2]);
 			if (generate_pair(in_key, in_crt, &key, &crt, TYPE_server, CN)) {
+				fprintf(stderr, "Failed to generate server key pair!\n");
+				return 1;
+			}
+		} else if (strncmp("both", argv[1], 4) == 0) {
+			CN = strdup(argv[2]);
+			if (generate_pair(in_key, in_crt, &key, &crt, TYPE_client|TYPE_server, CN)) {
 				fprintf(stderr, "Failed to generate server key pair!\n");
 				return 1;
 			}
@@ -206,7 +215,7 @@ int add_ext(X509V3_CTX *ctx, X509 *crt, int nid, char *value) /* {{{ */
 }
 /* }}} */
 
-int generate_pair(EVP_PKEY *ca_key, X509 *ca_crt, EVP_PKEY **key, X509 **crt, enum TYPE CERT_TYPE, char *CN) /* {{{ */
+int generate_pair(EVP_PKEY *ca_key, X509 *ca_crt, EVP_PKEY **key, X509 **crt, int CERT_TYPE, char *CN) /* {{{ */
 {
 	X509_REQ *req = NULL;
 	if (generate_key_csr(key, &req, CN)) {
@@ -222,39 +231,59 @@ int generate_pair(EVP_PKEY *ca_key, X509 *ca_crt, EVP_PKEY **key, X509 **crt, en
 	if (generate_set_random_serial(*crt)) goto err;
 
 	X509_gmtime_adj(X509_get_notBefore(*crt), 0);
-	if (CERT_TYPE == TYPE_intermediate || CERT_TYPE == TYPE_ca)
+	if (CERT_TYPE & TYPE_intermediate || CERT_TYPE & TYPE_ca)
 		X509_gmtime_adj(X509_get_notAfter(*crt),  315360000L);
-	if (CERT_TYPE == TYPE_server || CERT_TYPE == TYPE_client)
+	if (CERT_TYPE &  TYPE_server || CERT_TYPE & TYPE_client)
 		X509_gmtime_adj(X509_get_notAfter(*crt),  32400000L);
 
 	X509_set_subject_name(*crt, X509_REQ_get_subject_name(req));
 	EVP_PKEY *req_pubkey = X509_REQ_get_pubkey(req);
 	X509_set_pubkey(*crt, req_pubkey);
 	EVP_PKEY_free(req_pubkey);
-	if (CERT_TYPE == TYPE_ca)
+	if (CERT_TYPE & TYPE_ca)
 		X509_set_issuer_name(*crt, X509_get_subject_name(*crt));
 	else
 		X509_set_issuer_name(*crt, X509_get_subject_name(ca_crt));
 
 
 	X509V3_CTX      v3ctx;
-	if (CERT_TYPE == TYPE_ca)
+	if (CERT_TYPE & TYPE_ca)
 		X509V3_set_ctx(&v3ctx, *crt, *crt, NULL, NULL, 0);
 	else
 		X509V3_set_ctx(&v3ctx, ca_crt, *crt, NULL, NULL, 0);
 	if (add_ext(&v3ctx, *crt,
 		NID_subject_key_identifier, "hash")) goto err;
-	if (CERT_TYPE == TYPE_intermediate || CERT_TYPE == TYPE_ca) {
+	if (CERT_TYPE & TYPE_intermediate || CERT_TYPE & TYPE_ca) {
 		if (add_ext(&v3ctx, *crt,
 			NID_authority_key_identifier, "keyid:always")) goto err;
-		if (CERT_TYPE == TYPE_ca) {
+		if (CERT_TYPE & TYPE_ca) {
 			if (add_ext(&v3ctx, *crt, NID_basic_constraints, "critical,CA:TRUE")) goto err;
 		} else {
 			if (add_ext(&v3ctx, *crt, NID_basic_constraints, "critical,CA:TRUE,pathlen:0")) goto err;
 		}
 		if (add_ext(&v3ctx, *crt,
 			NID_key_usage, "critical,Digital Signature,Certificate Sign,CRL Sign")) goto err;
-	} else if (CERT_TYPE == TYPE_server) {
+	} else if (CERT_TYPE & TYPE_client & TYPE_server) {
+		if (add_ext(&v3ctx, *crt,
+			NID_basic_constraints, "CA:FALSE")) goto err;
+		if (add_ext(&v3ctx, *crt,
+			NID_netscape_cert_type, "server, client, email")) goto err;
+		if (add_ext(&v3ctx, *crt,
+			NID_netscape_comment, NS_COMMENT)) goto err;
+		if (add_ext(&v3ctx, *crt,
+			NID_authority_key_identifier, "keyid:always,issuer:always")) goto err;
+		if (add_ext(&v3ctx, *crt,
+			NID_key_usage, "critical,Non Repudiation,Digital Signature,Key Encipherment")) goto err;
+		if (add_ext(&v3ctx, *crt,
+			NID_ext_key_usage, "clientAuth,emailProtection,serverAuth")) goto err;
+		char alt[60];
+		strcpy(alt, "DNS.1:");
+		strcat(alt, CN);
+		strcat(alt, ",email:");
+		strcat(alt, CN);
+		if (add_ext(&v3ctx, *crt,
+			NID_subject_alt_name, alt)) goto err;
+	} else if (CERT_TYPE & TYPE_server) {
 		if (add_ext(&v3ctx, *crt,
 			NID_basic_constraints, "CA:FALSE")) goto err;
 		if (add_ext(&v3ctx, *crt,
@@ -272,7 +301,7 @@ int generate_pair(EVP_PKEY *ca_key, X509 *ca_crt, EVP_PKEY **key, X509 **crt, en
 		strcat(alt, CN);
 		if (add_ext(&v3ctx, *crt,
 			NID_subject_alt_name, alt)) goto err;
-	} else if (CERT_TYPE == TYPE_client) {
+	} else if (CERT_TYPE & TYPE_client) {
 		if (add_ext(&v3ctx, *crt,
 			NID_basic_constraints, "CA:FALSE")) goto err;
 		if (add_ext(&v3ctx, *crt,
@@ -291,7 +320,7 @@ int generate_pair(EVP_PKEY *ca_key, X509 *ca_crt, EVP_PKEY **key, X509 **crt, en
 		if (add_ext(&v3ctx, *crt,
 			NID_subject_alt_name, alt)) goto err;
 	}
-	if (CERT_TYPE == TYPE_ca) {
+	if (CERT_TYPE & TYPE_ca) {
 		if (X509_sign(*crt, *key, EVP_sha384()) == 0) goto err;
 	} else {
 		if (X509_sign(*crt, ca_key, EVP_sha384()) == 0) goto err;
