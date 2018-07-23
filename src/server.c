@@ -321,6 +321,13 @@ server(void *data)
 					if (strncmp("bcast", buf, 5) == 0) {
 						send_msg_all(sessions, buf + 5, 1024 - 5);
 					}
+					if (strncmp("reconnect", buf, 9) == 0) {
+						while (sessions->peer_len) {
+							send_msg(sessions, sessions->peer_len, "reconnect", strlen("reconnect"));
+							delete_client(server, sessions, sessions->peer_len);
+						}
+						goto UNLOOP;
+					}
 					memset(buf, 0, 1024);
 				} else {
 					for (p = 0; p < sessions->peer_len; p++) {
@@ -376,6 +383,8 @@ server(void *data)
 		}
 	}
 
+UNLOOP:
+	epoll_ctl(server->epollfd, EPOLL_CTL_DEL, server->fd, &ev);
 	close(server->fd);
 	SSL_CTX_free(server->ctx);
 
@@ -482,6 +491,12 @@ int serve(config_t *conf)
 							logger(LOG_NOTICE, "recieved sigint, someone is watching");
 						} else if (fdsi.ssi_signo == SIGHUP) {
 							logger(LOG_NOTICE, "recieved sighup, refreshing configs");
+							char buf[1024];
+							memset(buf, 0, 1024);
+							strncat(buf, "reconnect", 9);
+							for (int c = 0; c < intercom->len; c++) {
+								send(intercom->pairs[c]->fd[0], buf, 1024, 0);
+							}
 						} else if (fdsi.ssi_signo == SIGQUIT) {
 							logger(LOG_NOTICE, "recieved sigquit, shutting down");
 							//term_handler();
