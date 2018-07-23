@@ -9,6 +9,8 @@
 #include <netinet/tcp.h>
 #include <assert.h>
 #include <errno.h>
+#include <signal.h>
+#include <sys/signalfd.h>
 
 #include <sys/epoll.h>
 #include <sys/sysmacros.h>
@@ -439,11 +441,54 @@ int serve(config_t *conf)
 		intercom->len++;
 	}
 	logger(LOG_DEBUG, "initialized %d threads", id + 1);
+
+	sigset_t mask;
+	struct signalfd_siginfo fdsi;
+	int sfd;
+	ssize_t s;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGQUIT);
+	sigaddset(&mask, SIGHUP);
+
+	if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
+		logger(LOG_ERR, "failed to mask signals (%i) (%s)", errno, strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	if ((sfd = signalfd(-1, &mask, O_NONBLOCK)) == -1) {
+		logger(LOG_ERR, "failed to get signal FD (%i) (%s)", errno, strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	ev.events = EPOLLIN|EPOLLET;
+	ev.data.fd = sfd;
+	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sfd, &ev) == -1) {
+		logger(LOG_ERR, "failed to add signal fd to loop (%i) %s", errno, strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
 	logger(LOG_DEBUG, "main thread initialized");
 	for (;;) {
 		if ((nfds = epoll_wait(epollfd, events, SOMAXCONN, -1)) == -1) {
 			for (n = 0; n < nfds; ++n) {
 				if (events[n].events & EPOLLIN) {
+					if (events[n].data.fd == sfd) {
+						s = read(sfd, &fdsi, sizeof(struct signalfd_siginfo));
+						if (s != sizeof(struct signalfd_siginfo))
+							logger(LOG_ERR, "epoll read, main loop");
+						if (fdsi.ssi_signo == SIGINT) {
+							logger(LOG_NOTICE, "recieved sigint, someone is watching");
+						} else if (fdsi.ssi_signo == SIGHUP) {
+							logger(LOG_NOTICE, "recieved sighup, refreshing configs");
+						} else if (fdsi.ssi_signo == SIGQUIT) {
+							logger(LOG_NOTICE, "recieved sigquit, shutting down");
+							//term_handler();
+						} else {
+							logger(LOG_WARNING, "Read unexpected signal");
+						}
+					}
 					for (int i = 0; i < intercom->len; i++) {
 						if (events[n].data.fd == intercom->pairs[i]->fd[0]) {
 							logger(LOG_DEBUG, "[%d] checking intercom message", i);
