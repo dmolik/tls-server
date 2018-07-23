@@ -9,3 +9,8 @@ char * strdup(const char *src)
 		return NULL;
 	return (char *)memcpy(s, src, len);
 }
+
+void strfree(char *src)
+{
+	free(src);
+}

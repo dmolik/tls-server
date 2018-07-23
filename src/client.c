@@ -229,6 +229,20 @@ int client (void)
 				data[index - 1] = '\0';
 				err = SSL_write(ssl, data, index * 64);
 				memset(data, 0, 4096);
+				if (err <= 0) {
+					if (err == SSL_ERROR_WANT_READ ||
+						err == SSL_ERROR_WANT_WRITE ||
+						err == SSL_ERROR_WANT_X509_LOOKUP) {
+						printf("Read could not complete. Will be invoked later.");
+						break;
+					} else if(err == SSL_ERROR_ZERO_RETURN) {
+						printf("SSL_read: close notify received from peer");
+						return 0;
+					} else {
+						printf("Error during SSL_read");
+						exit(EXIT_FAILURE);
+					}
+				}
 			}
 		}
 	}

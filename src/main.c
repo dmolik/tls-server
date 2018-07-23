@@ -126,6 +126,14 @@ main(int argc, char *argv[])
 		logger(LOG_ERR, "Failed to start tls-server");
 		exit(EXIT_FAILURE);
 	}
+	strfree(config->uid);
+	strfree(config->gid);
+	strfree(config->pid);
+	strfree(config->conf);
+	strfree(config->certs.chain);
+	strfree(config->certs.key);
+	strfree(config->certs.ca);
+	free(config);
 
 	return 0;
 }

@@ -255,6 +255,7 @@ server(void *data)
 		logger(LOG_ERR, "[%d[ failed to allocate session storage (mem)", id);
 		exit(EXIT_FAILURE);
 	}
+	memset(sessions->peers, 0, sizeof(peer_t*) * config->sessions);
 
 	struct sockaddr_in peer_addr;
 	socklen_t peer_addr_size = sizeof(struct sockaddr_in);
@@ -329,7 +330,7 @@ server(void *data)
 								char msg[1024];
 								logger(LOG_INFO, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
-								sprintf(msg, "%s:%u - %s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
+								sprintf(msg, "%.25s:%hu - %.988s", inet_ntoa(sessions->peers[p]->addr.sin_addr),
 									ntohs(sessions->peers[p]->addr.sin_port), buf);
 								char imsg[1024] = "bcast";
 								strncat(imsg, msg, 1024 - 6);
