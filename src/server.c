@@ -288,6 +288,27 @@ server(void *data)
 		logger(LOG_ERR, "failed to add listening socket to fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
+
+	struct signalfd_siginfo fdsi;
+	ssize_t s;
+	int sfd;
+	sigset_t mask;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGQUIT);
+	sigaddset(&mask, SIGHUP);
+	if ((sfd = signalfd(-1, &mask, O_NONBLOCK)) == -1) {
+		logger(LOG_ERR, "failed to get signal FD (%i) (%s)", errno, strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	ev.events = EPOLLIN|EPOLLET;
+	ev.data.fd = sfd;
+	if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, sfd, &ev) == -1) {
+		logger(LOG_ERR, "failed to add signal fd to loop (%i) %s", errno, strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
 	logger(LOG_DEBUG, "[%d] Added event loop", id);
 	for (;;) {
 		if ((nfds = epoll_wait(server->epollfd, events, SOMAXCONN, -1)) == -1) {
@@ -329,6 +350,25 @@ server(void *data)
 						goto UNLOOP;
 					}
 					memset(buf, 0, 1024);
+				} else if (events[n].data.fd == sfd) {
+					s = read(sfd, &fdsi, sizeof(struct signalfd_siginfo));
+					if (s != sizeof(struct signalfd_siginfo))
+						logger(LOG_ERR, "epoll read, main loop");
+					if (fdsi.ssi_signo == SIGINT) {
+						logger(LOG_NOTICE, "recieved sigint, someone is watching");
+					} else if (fdsi.ssi_signo == SIGHUP) {
+						logger(LOG_NOTICE, "recieved sighup, refreshing configs");
+						char buf[1024];
+						memset(buf, 0, 1024);
+						strncat(buf, "reconnect", 9);
+						for (int c = 0; c < intercom->len; c++) {
+							send(intercom->pairs[c]->fd[0], buf, 1024, 0);
+						}
+					} else if (fdsi.ssi_signo == SIGQUIT) {
+						logger(LOG_NOTICE, "recieved sigquit, shutting down");
+					} else {
+						logger(LOG_WARNING, "Read unexpected signal");
+					}
 				} else {
 					for (p = 0; p < sessions->peer_len; p++) {
 						if (events[n].data.fd == sessions->peers[p]->fd) {
@@ -397,7 +437,17 @@ int serve(config_t *conf)
 	init_openssl();
 	config = conf;
 	struct epoll_event ev, events[SOMAXCONN];
-	int nfds, n, epollfd, fl, id;
+	int sfd, nfds, n, epollfd, fl, id;
+
+	sigset_t mask;
+	struct signalfd_siginfo fdsi;
+	ssize_t s;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGQUIT);
+	sigaddset(&mask, SIGHUP);
+	pthread_sigmask(SIG_BLOCK, &mask, NULL);
 
 	if ((intercom = malloc(sizeof(comm_t))) == NULL) {
 		logger(LOG_ERR, "failed to allocate global intercom (mem)");
@@ -409,10 +459,12 @@ int serve(config_t *conf)
 		exit(EXIT_FAILURE);
 	}
 	memset(intercom->pairs, 0, sizeof(pair_t*) * config->workers);
+
 	if ((epollfd = epoll_create1(0)) == -1) {
 		logger(LOG_ERR, "failed to create fd loop (%i) %s", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
+
 	logger(LOG_DEBUG, "spooling intercom with %d comms", config->workers);
 	pthread_t threads[config->workers];
 	id = 0;
@@ -451,26 +503,10 @@ int serve(config_t *conf)
 	}
 	logger(LOG_DEBUG, "initialized %d threads", id + 1);
 
-	sigset_t mask;
-	struct signalfd_siginfo fdsi;
-	int sfd;
-	ssize_t s;
-
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGINT);
-	sigaddset(&mask, SIGQUIT);
-	sigaddset(&mask, SIGHUP);
-
-	if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
-		logger(LOG_ERR, "failed to mask signals (%i) (%s)", errno, strerror(errno));
-		exit(EXIT_FAILURE);
-	}
-
 	if ((sfd = signalfd(-1, &mask, O_NONBLOCK)) == -1) {
 		logger(LOG_ERR, "failed to get signal FD (%i) (%s)", errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-
 	ev.events = EPOLLIN|EPOLLET;
 	ev.data.fd = sfd;
 	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sfd, &ev) == -1) {
@@ -499,7 +535,6 @@ int serve(config_t *conf)
 							}
 						} else if (fdsi.ssi_signo == SIGQUIT) {
 							logger(LOG_NOTICE, "recieved sigquit, shutting down");
-							//term_handler();
 						} else {
 							logger(LOG_WARNING, "Read unexpected signal");
 						}
