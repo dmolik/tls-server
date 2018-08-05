@@ -81,7 +81,13 @@ int main(int argc, char *argv[])
 	X509     *crt = NULL;
 	char *CN = strdup(REQ_DN_CN);
 	if (argc > 1) {
-		if (strncmp("user", argv[1], 4) == 0) {
+		if (strncmp("both", argv[1], 4) == 0) {
+			CN = strdup(argv[2]);
+			if (generate_pair(in_key, in_crt, &key, &crt, TYPE_client|TYPE_server, CN)) {
+				fprintf(stderr, "Failed to generate server key pair!\n");
+				return 1;
+			}
+		} else if (strncmp("user", argv[1], 4) == 0) {
 			CN = strdup(argv[2]);
 			if (generate_pair(in_key, in_crt, &key, &crt, TYPE_client, CN)) {
 				fprintf(stderr, "Failed to generate client key pair!\n");
@@ -90,12 +96,6 @@ int main(int argc, char *argv[])
 		} else if (strncmp("server", argv[1], 6) == 0) {
 			CN = strdup(argv[2]);
 			if (generate_pair(in_key, in_crt, &key, &crt, TYPE_server, CN)) {
-				fprintf(stderr, "Failed to generate server key pair!\n");
-				return 1;
-			}
-		} else if (strncmp("both", argv[1], 4) == 0) {
-			CN = strdup(argv[2]);
-			if (generate_pair(in_key, in_crt, &key, &crt, TYPE_client|TYPE_server, CN)) {
 				fprintf(stderr, "Failed to generate server key pair!\n");
 				return 1;
 			}
@@ -263,7 +263,7 @@ int generate_pair(EVP_PKEY *ca_key, X509 *ca_crt, EVP_PKEY **key, X509 **crt, in
 		}
 		if (add_ext(&v3ctx, *crt,
 			NID_key_usage, "critical,Digital Signature,Certificate Sign,CRL Sign")) goto err;
-	} else if (CERT_TYPE & TYPE_client & TYPE_server) {
+	} else if (CERT_TYPE & TYPE_client && CERT_TYPE & TYPE_server) {
 		if (add_ext(&v3ctx, *crt,
 			NID_basic_constraints, "CA:FALSE")) goto err;
 		if (add_ext(&v3ctx, *crt,
