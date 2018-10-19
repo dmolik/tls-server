@@ -360,7 +360,7 @@ server(void *data)
 						logger(LOG_NOTICE, "recieved sighup, refreshing configs");
 						char buf[1024];
 						memset(buf, 0, 1024);
-						strncat(buf, "reconnect", 9);
+						strcat(buf, "reconnect");
 						for (int c = 0; c < intercom->len; c++) {
 							send(intercom->pairs[c]->fd[0], buf, 1024, 0);
 						}
@@ -529,7 +529,7 @@ int serve(config_t *conf)
 							logger(LOG_NOTICE, "recieved sighup, refreshing configs");
 							char buf[1024];
 							memset(buf, 0, 1024);
-							strncat(buf, "reconnect", 9);
+							strcat(buf, "reconnect");
 							for (int c = 0; c < intercom->len; c++) {
 								send(intercom->pairs[c]->fd[0], buf, 1024, 0);
 							}
