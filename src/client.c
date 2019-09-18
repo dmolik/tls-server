@@ -16,6 +16,7 @@
 #include <openssl/err.h>
 #include <getopt.h>
 
+#include <string.h>
 #include "utils.h"
 #include "log.h"
 
@@ -66,7 +67,7 @@ void init_ssl_opts(SSL_CTX* ctx) {
 
 int client (void)
 {
-	const SSL_METHOD *meth = TLSv1_2_client_method();
+	const SSL_METHOD *meth = TLS_client_method();
 	SSL_CTX* ctx;
 	SSL* ssl;
 	int err;

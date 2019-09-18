@@ -2,8 +2,8 @@ CFLAGS  := -Wall -Wextra -pipe -pedantic -std=c99 -g
 LIBS    := -lcrypto -lssl -lpthread
 PERF    ?=
 ifeq ($(PERF), 1)
-LDFLAGS := -Wl,--as-needed -Wl,--hash-style=gnu
-CFLAGS  += -O3 -march=native -mtune=native -flto=8
+LDFLAGS := -Wl,--as-needed -Wl,--hash-style=gnu  -flto -fuse-linker-plugin
+CFLAGS  += -O3 -march=native -mtune=native -flto -fuse-linker-plugin
 endif
 
 OBJS += src/daemon.o src/log.o src/utils.o

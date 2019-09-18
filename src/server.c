@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <arpa/inet.h>
+#include <string.h>
 
 #include <fcntl.h>
 #include <netinet/tcp.h>
@@ -102,7 +103,7 @@ SSL_CTX *create_context()
 	const SSL_METHOD *method;
 	SSL_CTX *ctx;
 
-	method = TLSv1_2_server_method();
+	method = TLS_server_method();
 
 	if (!(ctx = SSL_CTX_new(method))) {
 		logger(LOG_ERR, "failed to create TLS context [%s]",
