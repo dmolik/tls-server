@@ -146,7 +146,7 @@ void initialize_crypto() /* {{{ */
 {
 	ERR_load_crypto_strings();
 	OpenSSL_add_all_algorithms();
-	OPENSSL_config(NULL);
+	OPENSSL_no_config();
 	// CRYPTO_malloc_debug_init();
 	// CRYPTO_set_mem_debug_options(V_CRYPTO_MDEBUG_ALL);
 	CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
@@ -156,7 +156,6 @@ void initialize_crypto() /* {{{ */
 void cleanup_crypto() /* {{{ */
 {
 	CRYPTO_cleanup_all_ex_data();
-	ERR_remove_thread_state(NULL);
 	ERR_free_strings();
 	//CRYPTO_mem_leaks_fp(stderr);
 }
